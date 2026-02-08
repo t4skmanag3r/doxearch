@@ -2,7 +2,9 @@ from abc import ABC
 
 
 class DocIndex(ABC):
-    def add_document(self, document_id: int, document_text: list[str]) -> None:
+    def add_document(
+        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+    ) -> None:
         raise NotImplementedError("Subclasses must implement this method")
 
     def remove_document(self, document_id: int) -> None:
