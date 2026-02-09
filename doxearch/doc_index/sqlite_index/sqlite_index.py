@@ -256,9 +256,120 @@ class SQLiteIndex(DocIndex):
             total_docs_stat = CorpusStats(stat_name="total_documents", stat_value=1)
             session.add(total_docs_stat)
 
-    def remove_document(self, document_id: int) -> None: ...
+    def remove_document(self, document_id: str) -> None:
+        """Remove a document from the index and update all related statistics.
 
-    def update_document(self, document_id: int, document_text: list[str]) -> None: ...
+        This method:
+        1. Removes the document record (cascades to inverted index entries)
+        2. Updates document frequency counts for all terms in the document
+        3. Removes document frequency entries for terms that no longer appear in any document
+        4. Updates corpus statistics
+
+        Args:
+            document_id (str): Unique identifier of the document to remove
+
+        Raises:
+            ValueError: If document_id does not exist in the index
+        """
+        with self.get_session() as session:
+            # Verify document exists
+            document = session.query(Document).filter_by(doc_id=document_id).first()
+            if not document:
+                raise ValueError(
+                    f"Document with id '{document_id}' does not exist in the index"
+                )
+
+            # Get all terms and their frequencies from this document before deletion
+            inverted_entries = (
+                session.query(InvertedIndex.term, InvertedIndex.term_frequency)
+                .filter_by(doc_id=document_id)
+                .all()
+            )
+            term_frequencies: dict[str, int] = {
+                term: frequency for term, frequency in inverted_entries
+            }
+            # Delete document (cascades to inverted index entries due to relationship)
+            session.delete(document)
+            session.flush()
+
+            # Update document frequencies for each term
+
+            self._decrement_document_frequencies(session, term_frequencies)
+
+            # Update corpus statistics
+            self._decrement_corpus_statistics(session)
+
+            session.commit()
+
+    def _decrement_document_frequencies(
+        self, session, term_frequencies: dict[str, int]
+    ) -> None:
+        """Decrement document frequency counts and remove entries for terms no longer in corpus.
+
+        Args:
+            session: SQLAlchemy session
+            term_frequencies (dict[str, int]): Term frequency mapping from removed document
+        """
+        for term, frequency in term_frequencies.items():
+            df_entry = session.query(DocumentFrequency).filter_by(term=term).first()
+
+            if df_entry:
+                new_doc_count = df_entry.doc_count - 1
+                new_total_frequency = df_entry.total_frequency - frequency
+
+                if new_doc_count == 0:
+                    # Term no longer appears in any document, remove entry
+                    session.delete(df_entry)
+                else:
+                    # Update counts
+                    session.query(DocumentFrequency).filter_by(term=term).update(
+                        {
+                            "doc_count": new_doc_count,
+                            "total_frequency": new_total_frequency,
+                        }
+                    )
+
+    def _decrement_corpus_statistics(self, session) -> None:
+        """Decrement global corpus statistics (total document count).
+
+        Args:
+            session: SQLAlchemy session
+        """
+        total_docs_stat = (
+            session.query(CorpusStats).filter_by(stat_name="total_documents").first()
+        )
+
+        if total_docs_stat:
+            new_value = total_docs_stat.stat_value - 1
+            if new_value == 0:
+                # No documents left, remove the stat entry
+                session.delete(total_docs_stat)
+            else:
+                session.query(CorpusStats).filter_by(
+                    stat_name="total_documents"
+                ).update({"stat_value": new_value})
+
+    def update_document(
+        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+    ) -> None:
+        """Update an existing document in the index with new term frequencies.
+
+        This method removes the old document and adds it back with new data,
+        effectively updating all related statistics and inverted index entries.
+
+        Args:
+            document_id (str): Unique identifier of the document to update
+            term_frequencies (dict[str, int]): New term frequency mapping
+            filepath (str): Path to the document file (can be updated)
+
+        Raises:
+            ValueError: If document_id does not exist in the index
+        """
+        # Remove the old document (this validates existence and updates all stats)
+        self.remove_document(document_id)
+
+        # Add the document back with new data
+        self.add_document(document_id, term_frequencies, filepath)
 
     def document_exists(self, document_id: int) -> bool:
         """Check if a document exists in the index.

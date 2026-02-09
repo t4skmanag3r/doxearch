@@ -10,7 +10,9 @@ class DocIndex(ABC):
     def remove_document(self, document_id: int) -> None:
         raise NotImplementedError("Subclasses must implement this method")
 
-    def update_document(self, document_id: int, document_text: list[str]) -> None:
+    def update_document(
+        self, document_id: int, term_frequencies: dict[str, int], filepath: str
+    ) -> None:
         raise NotImplementedError("Subclasses must implement this method")
 
     def document_exists(self, document_id: int) -> bool:
