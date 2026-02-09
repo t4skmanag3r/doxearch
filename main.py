@@ -1,78 +1,60 @@
-from doxearch.doc_index.sqlite_index.sqlite_index import SQLiteIndex
+from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
 
 
 def main():
-    # Initialize the index
-    index = SQLiteIndex()
-
-    # Mock data: pre-computed term frequencies
-    # Simulating what would come from tokenization + TF computation
-    mock_term_frequencies_1 = {
-        "sample": 1,
-        "document": 1,
-        "this": 1,
-        "is": 1,
-        "a": 1,
-        "another": 1,
-        "sentence": 1,
-        "here": 1,
-    }
-
-    mock_term_frequencies_2 = {
-        "search": 3,
-        "engine": 2,
-        "document": 2,
-        "indexing": 1,
-        "retrieval": 1,
-    }
-
-    mock_term_frequencies_3 = {"sample": 2, "text": 1, "document": 1, "search": 1}
-
+    # Initialize the tokenizer with Lithuanian model
+    print("Initializing SpacyTokenizer with Lithuanian model...")
     try:
-        # Add first document
-        print("Adding document 1...")
-        index.add_document(
-            document_id="doc_1",
-            term_frequencies=mock_term_frequencies_1,
-            filepath="/mock/path/document1.pdf",
-        )
-        print(f"✓ Document 1 added. Total documents: {index.get_document_count()}")
+        tokenizer = SpacyTokenizer(model="lt_core_news_sm")
+        print("✓ Lithuanian tokenizer initialized successfully")
+    except ValueError as e:
+        print(f"✗ Error initializing tokenizer: {e}")
+        print("\nTo install the Lithuanian model, run:")
+        print("  uv run python -m spacy download lt_core_news_sm")
+        return
 
-        # Add second document
-        print("\nAdding document 2...")
-        index.add_document(
-            document_id="doc_2",
-            term_frequencies=mock_term_frequencies_2,
-            filepath="/mock/path/document2.pdf",
-        )
-        print(f"✓ Document 2 added. Total documents: {index.get_document_count()}")
+    # Test texts in Lithuanian
+    test_texts = [
+        "Labas rytas! Kaip laikaisi?",
+        "Lietuva yra graži šalis su turtinga istorija.",
+        "Vilnius, Kaunas ir Klaipėda yra didžiausi Lietuvos miestai.",
+        "Šiandien oras labai gražus, saulėta ir šilta.",
+    ]
 
-        # Add third document
-        print("\nAdding document 3...")
-        index.add_document(
-            document_id="doc_3",
-            term_frequencies=mock_term_frequencies_3,
-            filepath="/mock/path/document3.pdf",
-        )
-        print(f"✓ Document 3 added. Total documents: {index.get_document_count()}")
+    print("\n=== Testing Lithuanian Tokenization ===\n")
 
-        # Test duplicate document (should raise error)
-        print("\nTrying to add duplicate document...")
-        try:
-            index.add_document(
-                document_id="doc_1",
-                term_frequencies=mock_term_frequencies_1,
-                filepath="/mock/path/duplicate.pdf",
-            )
-        except ValueError as e:
-            print(f"✓ Duplicate check working: {e}")
+    for i, text in enumerate(test_texts, 1):
+        print(f"Text {i}: {text}")
+        tokens = tokenizer.tokenize(text)
+        print(f"Tokens ({len(tokens)}): {tokens}")
+        print()
 
-        print(f"\n=== Final Statistics ===")
-        print(f"Total documents in index: {index.get_document_count()}")
+    # Test with English text for comparison
+    print("=== Testing with English Text ===\n")
+    english_text = "Hello world! This is a test of the tokenizer."
+    print(f"Text: {english_text}")
+    tokens = tokenizer.tokenize(english_text)
+    print(f"Tokens ({len(tokens)}): {tokens}")
+    print()
 
-    except Exception as e:
-        print(f"✗ Error: {e}")
-        raise
+    # Test edge cases
+    print("=== Testing Edge Cases ===\n")
+
+    # Empty string
+    empty_tokens = tokenizer.tokenize("")
+    print(f"Empty string tokens: {empty_tokens} (length: {len(empty_tokens)})")
+
+    # Only punctuation
+    punct_tokens = tokenizer.tokenize(".,!?;:")
+    print(f"Punctuation only tokens: {punct_tokens} (length: {len(punct_tokens)})")
+
+    # Mixed case
+    mixed_text = "LABAS Rytas kaip LAIKAISI?"
+    mixed_tokens = tokenizer.tokenize(mixed_text)
+    print(f"Mixed case text: {mixed_text}")
+    print(f"Tokens: {mixed_tokens}")
+
+    print("\n✓ All tokenization tests completed successfully!")
 
 
 if __name__ == "__main__":
