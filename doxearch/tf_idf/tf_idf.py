@@ -2,7 +2,7 @@ import math
 from collections import Counter
 
 
-def add_document(document: list[str]) -> dict[str, float]:
+def compute_term_freq(document: list[str]) -> dict[str, float]:
     """Compute the term frequency for a document.
     TF = (number of times a term appears in a document) / (total number of terms in the document)
     """

@@ -4,6 +4,10 @@ import tempfile
 import pytest
 from sqlalchemy import inspect
 
+from doxearch.doc_index.sqlite_index.exceptions import (
+    DocumentExistsError,
+    DocumentNotFoundError,
+)
 from doxearch.doc_index.sqlite_index.sqlite_index import (
     CorpusStats,
     Document,
@@ -132,7 +136,7 @@ def test_add_document(index):
         session.close()
 
     # Test duplicate document ID raises error
-    with pytest.raises(ValueError, match="already exists in the index"):
+    with pytest.raises(DocumentExistsError, match="already exists in the index"):
         index.add_document(doc_id_1, term_freq_1, filepath_1)
 
     # Verify document count unchanged after failed duplicate
@@ -279,7 +283,7 @@ def test_remove_document(index):
         session.close()
 
     # Test removing non-existent document raises error
-    with pytest.raises(ValueError, match="does not exist in the index"):
+    with pytest.raises(DocumentNotFoundError, match="does not exist in the index"):
         index.remove_document("non_existent_doc")
 
 
@@ -468,5 +472,5 @@ def test_update_document(index):
         session.close()
 
     # Test updating non-existent document raises error
-    with pytest.raises(ValueError, match="does not exist in the index"):
+    with pytest.raises(DocumentNotFoundError, match="does not exist in the index"):
         index.update_document("non_existent_doc", {"term": 1}, "/path/to/fake.pdf")

@@ -1,11 +1,19 @@
+import math
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Generator
 
-from sqlalchemy import Column, ForeignKey, Index, Integer, String, create_engine
+from sqlalchemy import Column, Float, ForeignKey, Index, Integer, String, create_engine
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 from doxearch.doc_index.doc_index import DocIndex
+from doxearch.doc_index.sqlite_index.exceptions import (
+    DocumentExistsError,
+    DocumentNotFoundError,
+    InvalidDocumentIdError,
+    InvalidFilePathError,
+    InvalidTermFrequencyError,
+)
 
 Base = declarative_base()
 
@@ -47,6 +55,9 @@ class InvertedIndex(Base):
         String, ForeignKey("documents.doc_id", ondelete="CASCADE"), primary_key=True
     )
     term_frequency = Column(Integer, nullable=False)  # Raw count in document
+    normalized_tf = Column(
+        Float, nullable=False
+    )  # Normalized term frequency for TF-IDF
 
     # Relationships
     document = relationship("Document", back_populates="term_frequencies")
@@ -59,7 +70,7 @@ class InvertedIndex(Base):
     )
 
     def __repr__(self):
-        return f"<InvertedIndex(term='{self.term}', doc='{self.doc_id}', freq={self.term_frequency})>"
+        return f"<InvertedIndex(term='{self.term}', doc='{self.doc_id}', freq={self.term_frequency}, norm_tf={self.normalized_tf:.4f})>"
 
 
 class DocumentFrequency(Base):
@@ -138,8 +149,13 @@ class SQLiteIndex(DocIndex):
             filepath (str): Path to the original document file
 
         Raises:
-            ValueError: If document_id already exists in the index
+            InvalidDocumentIdError: If document_id is empty or None
+            InvalidTermFrequencyError: If term_frequencies is empty or contains invalid values
+            InvalidFilePathError: If filepath is empty or None
+            DocumentExistsError: If document_id already exists in the index
         """
+        self._validate_add_document_inputs(document_id, term_frequencies, filepath)
+
         with self.get_session() as session:
             self._validate_document_id(session, document_id)
             self._create_document_record(
@@ -151,6 +167,45 @@ class SQLiteIndex(DocIndex):
             self._update_corpus_statistics(session)
             session.commit()
 
+    def _validate_add_document_inputs(
+        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+    ) -> None:
+        """Validate inputs for add_document method.
+
+        Args:
+            document_id (str): Document identifier to validate
+            term_frequencies (dict[str, int]): Term frequencies to validate
+            filepath (str): File path to validate
+
+        Raises:
+            InvalidDocumentIdError: If document_id is empty or None
+            InvalidTermFrequencyError: If term_frequencies is invalid
+            InvalidFilePathError: If filepath is empty or None
+        """
+        if not document_id or not isinstance(document_id, str):
+            raise InvalidDocumentIdError("Document ID must be a non-empty string")
+
+        if not filepath or not isinstance(filepath, str):
+            raise InvalidFilePathError("File path must be a non-empty string")
+
+        if not term_frequencies:
+            raise InvalidTermFrequencyError(
+                "Term frequencies dictionary cannot be empty"
+            )
+
+        if not isinstance(term_frequencies, dict):
+            raise InvalidTermFrequencyError("Term frequencies must be a dictionary")
+
+        for term, freq in term_frequencies.items():
+            if not isinstance(term, str) or not term:
+                raise InvalidTermFrequencyError(
+                    f"Term must be a non-empty string, got: {term}"
+                )
+            if not isinstance(freq, int) or freq <= 0:
+                raise InvalidTermFrequencyError(
+                    f"Frequency for term '{term}' must be a positive integer, got: {freq}"
+                )
+
     def _validate_document_id(self, session, document_id: str) -> None:
         """Check if document already exists in the index.
 
@@ -159,13 +214,11 @@ class SQLiteIndex(DocIndex):
             document_id (str): Document identifier to validate
 
         Raises:
-            ValueError: If document_id already exists
+            DocumentExistsError: If document_id already exists
         """
         existing_doc = session.query(Document).filter_by(doc_id=document_id).first()
         if existing_doc:
-            raise ValueError(
-                f"Document with id '{document_id}' already exists in the index"
-            )
+            raise DocumentExistsError(document_id)
 
     def _create_document_record(
         self,
@@ -225,16 +278,26 @@ class SQLiteIndex(DocIndex):
     def _create_inverted_index_entries(
         self, session, document_id: str, term_frequencies: dict[str, int]
     ) -> None:
-        """Create inverted index entries for all terms in the document.
+        """Create inverted index entries for a document.
 
         Args:
             session: SQLAlchemy session
             document_id (str): Document identifier
             term_frequencies (dict[str, int]): Term frequency mapping
         """
+
+        # Calculate document length for normalization
+        doc_length = sum(term_frequencies.values())
+
         for term, frequency in term_frequencies.items():
+            # Calculate normalized TF using L2 normalization
+            normalized_tf = frequency / math.sqrt(doc_length)
+
             inverted_entry = InvertedIndex(
-                term=term, doc_id=document_id, term_frequency=frequency
+                term=term,
+                doc_id=document_id,
+                term_frequency=frequency,
+                normalized_tf=normalized_tf,
             )
             session.add(inverted_entry)
 
@@ -269,15 +332,17 @@ class SQLiteIndex(DocIndex):
             document_id (str): Unique identifier of the document to remove
 
         Raises:
-            ValueError: If document_id does not exist in the index
+            InvalidDocumentIdError: If document_id is empty or None
+            DocumentNotFoundError: If document_id does not exist in the index
         """
+        if not document_id or not isinstance(document_id, str):
+            raise InvalidDocumentIdError("Document ID must be a non-empty string")
+
         with self.get_session() as session:
             # Verify document exists
             document = session.query(Document).filter_by(doc_id=document_id).first()
             if not document:
-                raise ValueError(
-                    f"Document with id '{document_id}' does not exist in the index"
-                )
+                raise DocumentNotFoundError(document_id)
 
             # Get all terms and their frequencies from this document before deletion
             inverted_entries = (
@@ -293,7 +358,6 @@ class SQLiteIndex(DocIndex):
             session.flush()
 
             # Update document frequencies for each term
-
             self._decrement_document_frequencies(session, term_frequencies)
 
             # Update corpus statistics
@@ -363,8 +427,13 @@ class SQLiteIndex(DocIndex):
             filepath (str): Path to the document file (can be updated)
 
         Raises:
-            ValueError: If document_id does not exist in the index
+            InvalidDocumentIdError: If document_id is empty or None
+            InvalidTermFrequencyError: If term_frequencies is invalid
+            InvalidFilePathError: If filepath is empty or None
+            DocumentNotFoundError: If document_id does not exist in the index
         """
+        self._validate_add_document_inputs(document_id, term_frequencies, filepath)
+
         # Remove the old document (this validates existence and updates all stats)
         self.remove_document(document_id)
 

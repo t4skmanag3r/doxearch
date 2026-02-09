@@ -1,31 +1,39 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 
 
 class DocIndex(ABC):
+    @abstractmethod
     def add_document(
         self, document_id: str, term_frequencies: dict[str, int], filepath: str
     ) -> None:
-        raise NotImplementedError("Subclasses must implement this method")
+        """Add a document to the index."""
 
-    def remove_document(self, document_id: int) -> None:
-        raise NotImplementedError("Subclasses must implement this method")
+    @abstractmethod
+    def remove_document(self, document_id: str) -> None:
+        """Remove a document from the index."""
 
+    @abstractmethod
     def update_document(
-        self, document_id: int, term_frequencies: dict[str, int], filepath: str
+        self, document_id: str, term_frequencies: dict[str, int], filepath: str
     ) -> None:
-        raise NotImplementedError("Subclasses must implement this method")
+        """Update an existing document in the index."""
 
-    def document_exists(self, document_id: int) -> bool:
-        raise NotImplementedError("Subclasses must implement this method")
+    @abstractmethod
+    def document_exists(self, document_id: str) -> bool:
+        """Check if a document exists in the index."""
 
+    @abstractmethod
     def get_document_count(self) -> int:
-        raise NotImplementedError("Subclasses must implement this method")
+        """Get the total number of documents in the index."""
 
+    @abstractmethod
     def reindex(self) -> None:
-        raise NotImplementedError("Subclasses must implement this method")
+        """Reindex all documents."""
 
-    def __contains__(self, document_id: int) -> bool:
+    def __contains__(self, document_id: str) -> bool:
+        """Allow 'document_id in index' syntax."""
         return self.document_exists(document_id)
 
     def __len__(self) -> int:
+        """Allow len(index) syntax."""
         return self.get_document_count()
