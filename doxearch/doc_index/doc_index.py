@@ -4,7 +4,11 @@ from abc import ABC, abstractmethod
 class DocIndex(ABC):
     @abstractmethod
     def add_document(
-        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+        self,
+        document_id: str,
+        term_frequencies: dict[str, int],
+        filename: str,
+        filepath: str,
     ) -> None:
         """Add a document to the index."""
 
@@ -14,13 +18,21 @@ class DocIndex(ABC):
 
     @abstractmethod
     def update_document(
-        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+        self,
+        document_id: str,
+        term_frequencies: dict[str, int],
+        filename: str,
+        filepath: str,
     ) -> None:
         """Update an existing document in the index."""
 
     @abstractmethod
     def document_exists(self, document_id: str) -> bool:
         """Check if a document exists in the index."""
+
+    @abstractmethod
+    def check_bulk_documents_exist(self, document_ids: list[str]) -> dict[str, bool]:
+        """Check if multiple documents exist in the index. (Bulk db operation)."""
 
     @abstractmethod
     def get_document_count(self) -> int:

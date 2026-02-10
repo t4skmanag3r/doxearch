@@ -26,9 +26,10 @@ class Document(Base):
     __tablename__ = "documents"
 
     doc_id = Column(String, primary_key=True)
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(255), nullable=False)
     term_count = Column(Integer, nullable=False)  # Total terms in document
     unique_terms = Column(Integer, nullable=False)  # Number of unique terms
-    file_path = Column(String(255), nullable=False)
     last_indexed = Column(
         Integer, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -39,7 +40,7 @@ class Document(Base):
     )
 
     def __repr__(self):
-        return f"<Document(doc_id='{self.doc_id}', terms={self.term_count})>"
+        return f"<Document(doc_id='{self.doc_id}', filename='{self.filename}, terms={self.term_count})>"
 
 
 class InvertedIndex(Base):
@@ -138,7 +139,11 @@ class SQLiteIndex(DocIndex):
             session.close()
 
     def add_document(
-        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+        self,
+        document_id: str,
+        term_frequencies: dict[str, int],
+        filename: str,
+        filepath: str,
     ) -> None:
         """Add a document to the index with pre-computed term frequencies.
 
@@ -146,6 +151,7 @@ class SQLiteIndex(DocIndex):
             document_id (str): Unique identifier for the document.
             term_frequencies (dict[str, int]): Dictionary mapping terms to their frequencies in the document
                 e.g., {"search": 5, "engine": 3, "document": 7}
+            filename (str): Original filename of the document
             filepath (str): Path to the original document file
 
         Raises:
@@ -159,7 +165,7 @@ class SQLiteIndex(DocIndex):
         with self.get_session() as session:
             self._validate_document_id(session, document_id)
             self._create_document_record(
-                session, document_id, term_frequencies, filepath
+                session, document_id, term_frequencies, filename, filepath
             )
             self._update_document_frequencies(session, term_frequencies)
             session.flush()
@@ -225,6 +231,7 @@ class SQLiteIndex(DocIndex):
         session,
         document_id: str,
         term_frequencies: dict[str, int],
+        filename: str,
         filepath: str,
     ) -> None:
         """Create and add a document record to the session.
@@ -233,6 +240,7 @@ class SQLiteIndex(DocIndex):
             session: SQLAlchemy session
             document_id (str): Unique document identifier
             term_frequencies (dict[str, int]): Term frequency mapping
+            filename (str): Original filename of the document
             filepath (str): Path to the document file
         """
         total_terms = sum(term_frequencies.values())
@@ -242,6 +250,7 @@ class SQLiteIndex(DocIndex):
             doc_id=document_id,
             term_count=total_terms,
             unique_terms=unique_terms,
+            filename=filename,
             file_path=filepath,
             last_indexed=int(datetime.now(timezone.utc).timestamp()),
         )
@@ -414,7 +423,11 @@ class SQLiteIndex(DocIndex):
                 ).update({"stat_value": new_value})
 
     def update_document(
-        self, document_id: str, term_frequencies: dict[str, int], filepath: str
+        self,
+        document_id: str,
+        term_frequencies: dict[str, int],
+        filename: str,
+        filepath: str,
     ) -> None:
         """Update an existing document in the index with new term frequencies.
 
@@ -424,6 +437,7 @@ class SQLiteIndex(DocIndex):
         Args:
             document_id (str): Unique identifier of the document to update
             term_frequencies (dict[str, int]): New term frequency mapping
+            filename (str): Name of the document file (can be updated)
             filepath (str): Path to the document file (can be updated)
 
         Raises:
@@ -438,12 +452,12 @@ class SQLiteIndex(DocIndex):
         self.remove_document(document_id)
 
         # Add the document back with new data
-        self.add_document(document_id, term_frequencies, filepath)
+        self.add_document(document_id, term_frequencies, filename, filepath)
 
-    def document_exists(self, document_id: int) -> bool:
+    def document_exists(self, document_id: str) -> bool:
         """Check if a document exists in the index.
         Args:
-            document_id: ID of the document to check
+            document_id (str): ID of the document to check
 
         Returns:
             bool: True if the document exists, False otherwise
@@ -453,6 +467,31 @@ class SQLiteIndex(DocIndex):
                 session.query(Document).filter_by(doc_id=document_id).first()
                 is not None
             )
+
+    def check_bulk_documents_exist(self, document_ids: list[str]) -> dict[str, bool]:
+        """Check if multiple documents exist in the index. (Bulk db operation).
+        Args:
+            document_ids (list[str]): List of IDs of documents to check
+
+        Returns:
+            dict[str, bool]: A dictionary mapping document IDs to their existence status
+        """
+        if not document_ids:
+            return {}
+
+        with self.get_session() as session:
+            # Single query to fetch all existing document IDs
+            existing_docs = (
+                session.query(Document.doc_id)
+                .filter(Document.doc_id.in_(document_ids))
+                .all()
+            )
+
+            # Convert to set for O(1) lookup
+            existing_ids = {doc.doc_id for doc in existing_docs}
+
+            # Build result dictionary
+            return {doc_id: doc_id in existing_ids for doc_id in document_ids}
 
     def get_document_count(self) -> int:
         """Get total count of documents in the index

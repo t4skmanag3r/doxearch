@@ -2,15 +2,18 @@ import platform
 from pathlib import Path
 from typing import Counter
 
-from doxearch.doc_index.sqlite_index.exceptions import DocumentExistsError
+from doxearch.doc_index.doc_index import DocIndex
+from doxearch.doc_index.sqlite_index.exceptions import (
+    DocumentExistsError,
+    InvalidTermFrequencyError,
+)
 from doxearch.doc_index.sqlite_index.sqlite_index import (
     DocumentFrequency,
     InvertedIndex,
-    SQLiteIndex,
 )
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
-from doxearch.tf_idf.tf_idf import compute_idf, compute_term_freq, compute_tf_idf
-from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
+from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
+from doxearch.tokenizer.tokenizer import Tokenizer
 
 
 def get_app_data_dir() -> Path:
@@ -34,27 +37,35 @@ def get_app_data_dir() -> Path:
 
 
 class Doxearch:
-    def __init__(self):
-        app_data_dir = get_app_data_dir()
-        db_path = app_data_dir / "doxearch.db"
-        self.index = SQLiteIndex(db_path=str(db_path))
-        self.tokenizer = SpacyTokenizer()
+    def __init__(self, index: DocIndex, tokenizer: Tokenizer):
+        self.index = index
+        self.tokenizer = tokenizer
         self.pdf_doc_parser = PDFParser()
 
     def index_folder(self, folder_path: Path):
         indexed_documents = 0
-        for file_path in folder_path.rglob("*.pdf"):
+        files = folder_path.rglob("*.pdf")
+        documents_exist = self.index.check_bulk_documents_exist(
+            [str(file_path) for file_path in files]
+        )
+        filtered_files = [
+            Path(file_path)
+            for file_path, exists in documents_exist.items()
+            if not exists
+        ]
+        for file_path in filtered_files:
             try:
                 text = self.pdf_doc_parser.parse(file_path)
                 tokens = self.tokenizer.tokenize(text)
                 # Use Counter to get raw term counts (int), not normalized frequencies (float)
                 term_counts = dict(Counter(tokens))
                 doc_id = str(file_path.absolute())
+                filename = file_path.name
 
-                self.index.add_document(doc_id, term_counts, str(file_path))
+                self.index.add_document(doc_id, term_counts, filename, str(file_path))
                 indexed_documents += 1
                 print(f"Indexed document: {file_path.name}")
-            except DocumentExistsError:
+            except (DocumentExistsError, InvalidTermFrequencyError):
                 pass
 
         print(f"\nIndexed {indexed_documents} documents.")

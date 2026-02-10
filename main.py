@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from doxearch.doxearch import Doxearch
+from doxearch.doc_index.sqlite_index.sqlite_index import SQLiteIndex
+from doxearch.doxearch import Doxearch, get_app_data_dir
+from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
 
 
 def main():
@@ -9,7 +11,11 @@ def main():
     # Initialize Doxearch
     print("Initializing Doxearch...")
     try:
-        doxearch = Doxearch()
+        app_data_dir = get_app_data_dir()
+        db_path = app_data_dir / "doxearch.db"
+        index = SQLiteIndex(db_path=str(db_path))
+        tokenizer = SpacyTokenizer(model="lt_core_news_sm")
+        doxearch = Doxearch(index, tokenizer)
         print("✓ Doxearch initialized successfully")
         print(f"✓ Database location: {doxearch.index.engine.url}")
     except Exception as e:
@@ -21,7 +27,7 @@ def main():
     print(f"✓ Current documents in index: {doc_count}\n")
 
     # Test folder path - adjust this to your test documents location
-    test_folder = Path.home() / "Documents" / "test_pdfs"
+    test_folder = Path("/run/media/eleos/CORSAIR/Isakymai/")
 
     # Check if test folder exists
     if not test_folder.exists():
@@ -74,43 +80,6 @@ def main():
             print(f"  File: {Path(doc.file_path).name}")
             print(f"  Terms: {doc.term_count} total, {doc.unique_terms} unique")
             print(f"  Indexed: {doc.last_indexed}")
-
-    # Perform example searches
-    print("\n" + "=" * 60)
-    print("=== Example Searches ===")
-    print("=" * 60)
-
-    # Define search queries related to software engineering
-    search_queries = [
-        "software design patterns",
-        "agile development methodology",
-        "testing and quality assurance",
-        "code review best practices",
-        "microservices architecture",
-    ]
-
-    for query in search_queries:
-        print(f"\n🔍 Query: '{query}'")
-        print("-" * 60)
-
-        try:
-            results = doxearch.search(query, top_k=5)
-
-            if not results:
-                print("  No results found.")
-            else:
-                print(f"  Found {len(results)} result(s):\n")
-                for rank, (doc_id, score) in enumerate(results, 1):
-                    filename = Path(doc_id).name
-                    print(f"  {rank}. {filename}")
-                    print(f"     Score: {score:.4f}")
-                    print(f"     Path: {doc_id}")
-                    print()
-        except Exception as e:
-            print(f"  ✗ Error during search: {e}")
-            import traceback
-
-            traceback.print_exc()
 
     # Interactive search mode
     print("\n" + "=" * 60)

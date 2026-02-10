@@ -62,14 +62,16 @@ def test_add_document(index):
     # Prepare test data
     doc_id_1 = "doc_1"
     term_freq_1 = {"search": 3, "engine": 2, "document": 2}
+    filename_1 = "doc1.pdf"
     filepath_1 = "/path/to/doc1.pdf"
 
     doc_id_2 = "doc_2"
     term_freq_2 = {"search": 5, "indexing": 1, "retrieval": 1}
+    filename_2 = "doc2.pdf"
     filepath_2 = "/path/to/doc2.pdf"
 
     # Add first document
-    index.add_document(doc_id_1, term_freq_1, filepath_1)
+    index.add_document(doc_id_1, term_freq_1, filename_1, filepath_1)
 
     session = index.Session()
     try:
@@ -77,6 +79,7 @@ def test_add_document(index):
         doc1 = session.query(Document).filter_by(doc_id=doc_id_1).first()
         assert doc1 is not None
         assert doc1.doc_id == doc_id_1
+        assert doc1.filename == filename_1
         assert doc1.file_path == filepath_1
         assert doc1.term_count == 7  # 3 + 2 + 2
         assert doc1.unique_terms == 3
@@ -105,13 +108,14 @@ def test_add_document(index):
         session.close()
 
     # Add second document with overlapping term
-    index.add_document(doc_id_2, term_freq_2, filepath_2)
+    index.add_document(doc_id_2, term_freq_2, filename_2, filepath_2)
 
     session = index.Session()
     try:
         # Verify second document record
         doc2 = session.query(Document).filter_by(doc_id=doc_id_2).first()
         assert doc2 is not None
+        assert doc2.filename == filename_2
         assert doc2.term_count == 7  # 5 + 1 + 1
 
         # Verify document frequency updated for overlapping term "search"
@@ -137,7 +141,7 @@ def test_add_document(index):
 
     # Test duplicate document ID raises error
     with pytest.raises(DocumentExistsError, match="already exists in the index"):
-        index.add_document(doc_id_1, term_freq_1, filepath_1)
+        index.add_document(doc_id_1, term_freq_1, filename_1, filepath_1)
 
     # Verify document count unchanged after failed duplicate
     assert index.get_document_count() == 2
@@ -148,20 +152,23 @@ def test_remove_document(index):
     # Prepare test data - add three documents
     doc_id_1 = "doc_1"
     term_freq_1 = {"search": 3, "engine": 2, "document": 2}
+    filename_1 = "doc1.pdf"
     filepath_1 = "/path/to/doc1.pdf"
 
     doc_id_2 = "doc_2"
     term_freq_2 = {"search": 5, "indexing": 1, "retrieval": 1}
+    filename_2 = "doc2.pdf"
     filepath_2 = "/path/to/doc2.pdf"
 
     doc_id_3 = "doc_3"
     term_freq_3 = {"engine": 1, "indexing": 2, "database": 3}
+    filename_3 = "doc3.pdf"
     filepath_3 = "/path/to/doc3.pdf"
 
     # Add all documents
-    index.add_document(doc_id_1, term_freq_1, filepath_1)
-    index.add_document(doc_id_2, term_freq_2, filepath_2)
-    index.add_document(doc_id_3, term_freq_3, filepath_3)
+    index.add_document(doc_id_1, term_freq_1, filename_1, filepath_1)
+    index.add_document(doc_id_2, term_freq_2, filename_2, filepath_2)
+    index.add_document(doc_id_3, term_freq_3, filename_3, filepath_3)
 
     # Verify initial state
     assert index.get_document_count() == 3
@@ -292,19 +299,22 @@ def test_remove_document_with_shared_terms(index):
     # Add documents with overlapping terms
     doc_id_1 = "doc_1"
     term_freq_1 = {"python": 5, "programming": 3, "language": 2}
+    filename_1 = "doc1.pdf"
     filepath_1 = "/path/to/doc1.pdf"
 
     doc_id_2 = "doc_2"
     term_freq_2 = {"python": 8, "programming": 4, "code": 6}
+    filename_2 = "doc2.pdf"
     filepath_2 = "/path/to/doc2.pdf"
 
     doc_id_3 = "doc_3"
     term_freq_3 = {"python": 3, "language": 5, "syntax": 2}
+    filename_3 = "doc3.pdf"
     filepath_3 = "/path/to/doc3.pdf"
 
-    index.add_document(doc_id_1, term_freq_1, filepath_1)
-    index.add_document(doc_id_2, term_freq_2, filepath_2)
-    index.add_document(doc_id_3, term_freq_3, filepath_3)
+    index.add_document(doc_id_1, term_freq_1, filename_1, filepath_1)
+    index.add_document(doc_id_2, term_freq_2, filename_2, filepath_2)
+    index.add_document(doc_id_3, term_freq_3, filename_3, filepath_3)
 
     # Remove middle document
     index.remove_document(doc_id_2)
@@ -345,14 +355,16 @@ def test_update_document(index):
     # Add initial documents
     doc_id_1 = "doc_1"
     term_freq_1 = {"python": 5, "programming": 3, "language": 2}
+    filename_1 = "doc1.pdf"
     filepath_1 = "/path/to/doc1.pdf"
 
     doc_id_2 = "doc_2"
     term_freq_2 = {"python": 8, "code": 4}
+    filename_2 = "doc2.pdf"
     filepath_2 = "/path/to/doc2.pdf"
 
-    index.add_document(doc_id_1, term_freq_1, filepath_1)
-    index.add_document(doc_id_2, term_freq_2, filepath_2)
+    index.add_document(doc_id_1, term_freq_1, filename_1, filepath_1)
+    index.add_document(doc_id_2, term_freq_2, filename_2, filepath_2)
 
     assert index.get_document_count() == 2
 
@@ -373,9 +385,10 @@ def test_update_document(index):
 
     # Update doc_1 with completely different terms
     new_term_freq_1 = {"java": 7, "code": 3, "object": 5}
+    new_filename_1 = "updated_doc1.pdf"
     new_filepath_1 = "/path/to/updated_doc1.pdf"
 
-    index.update_document(doc_id_1, new_term_freq_1, new_filepath_1)
+    index.update_document(doc_id_1, new_term_freq_1, new_filename_1, new_filepath_1)
 
     session = index.Session()
     try:
@@ -385,6 +398,7 @@ def test_update_document(index):
         # Verify document record updated
         doc1 = session.query(Document).filter_by(doc_id=doc_id_1).first()
         assert doc1 is not None
+        assert doc1.filename == new_filename_1
         assert doc1.file_path == new_filepath_1
         assert doc1.term_count == 15  # 7 + 3 + 5
         assert doc1.unique_terms == 3
@@ -441,7 +455,7 @@ def test_update_document(index):
 
     # Update doc_1 again with some overlapping terms
     updated_term_freq_1 = {"java": 10, "python": 2, "testing": 4}
-    index.update_document(doc_id_1, updated_term_freq_1, new_filepath_1)
+    index.update_document(doc_id_1, updated_term_freq_1, new_filename_1, new_filepath_1)
 
     session = index.Session()
     try:
@@ -473,4 +487,6 @@ def test_update_document(index):
 
     # Test updating non-existent document raises error
     with pytest.raises(DocumentNotFoundError, match="does not exist in the index"):
-        index.update_document("non_existent_doc", {"term": 1}, "/path/to/fake.pdf")
+        index.update_document(
+            "non_existent_doc", {"term": 1}, "fake.pdf", "/path/to/fake.pdf"
+        )
