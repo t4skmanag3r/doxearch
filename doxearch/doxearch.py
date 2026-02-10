@@ -14,6 +14,7 @@ from doxearch.doc_index.sqlite_index.sqlite_index import (
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
+from doxearch.utils.file_hash import compute_file_hash
 
 
 def get_app_data_dir() -> Path:
@@ -44,22 +45,34 @@ class Doxearch:
 
     def index_folder(self, folder_path: Path):
         indexed_documents = 0
-        files = folder_path.rglob("*.pdf")
+        files = list(folder_path.rglob("*.pdf"))
+
+        # Compute hashes for all files
+        file_hashes = {
+            str(file_path): compute_file_hash(file_path) for file_path in files
+        }
+
+        # Check which documents already exist using their hashes
         documents_exist = self.index.check_bulk_documents_exist(
-            [str(file_path) for file_path in files]
+            list(file_hashes.values())
         )
+
+        # Filter files that don't exist in the index
         filtered_files = [
             Path(file_path)
-            for file_path, exists in documents_exist.items()
-            if not exists
+            for file_path, file_hash in file_hashes.items()
+            if not documents_exist[file_hash]
         ]
+
         for file_path in filtered_files:
             try:
                 text = self.pdf_doc_parser.parse(file_path)
                 tokens = self.tokenizer.tokenize(text)
                 # Use Counter to get raw term counts (int), not normalized frequencies (float)
                 term_counts = dict(Counter(tokens))
-                doc_id = str(file_path.absolute())
+
+                # Use file hash as document ID
+                doc_id = file_hashes[str(file_path)]
                 filename = file_path.name
 
                 self.index.add_document(doc_id, term_counts, filename, str(file_path))
@@ -70,7 +83,7 @@ class Doxearch:
 
         print(f"\nIndexed {indexed_documents} documents.")
 
-    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+    def search(self, query: str, top_k: int = 10) -> list[dict[str, str | float]]:
         """
         Search for documents relevant to the query using pre-computed normalized TF-IDF scores.
 
@@ -79,7 +92,17 @@ class Doxearch:
             top_k: Number of top results to return (default: 10)
 
         Returns:
-            List of tuples (document_id, score) sorted by relevance score in descending order
+            List of dictionaries containing document metadata and scores:
+            [
+                {
+                    "doc_id": str,
+                    "filename": str,
+                    "filepath": str,
+                    "score": float
+                },
+                ...
+            ]
+            Sorted by relevance score in descending order
         """
 
         # Tokenize the query
@@ -138,7 +161,25 @@ class Doxearch:
                     doc_scores[posting.doc_id] = tf_idf_score
 
         # Sort documents by score in descending order
-        sorted_results = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
+        sorted_doc_ids = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[
+            :top_k
+        ]
 
-        # Return top_k results
-        return sorted_results[:top_k]
+        # Fetch document metadata for top results
+        results = []
+        with self.index.get_session() as session:
+            from doxearch.doc_index.sqlite_index.sqlite_index import Document
+
+            for doc_id, score in sorted_doc_ids:
+                doc = session.query(Document).filter_by(doc_id=doc_id).first()
+                if doc:
+                    results.append(
+                        {
+                            "doc_id": doc_id,
+                            "filename": doc.filename,
+                            "filepath": doc.file_path,
+                            "score": score,
+                        }
+                    )
+
+        return results

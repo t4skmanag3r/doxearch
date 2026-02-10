@@ -104,16 +104,22 @@ def main():
                 print("  No results found.\n")
             else:
                 print(f"\n  Found {len(results)} result(s):\n")
-                for rank, (doc_id, score) in enumerate(results, 1):
-                    filename = Path(doc_id).name
-                    print(f"  {rank}. {filename} (score: {score:.4f})")
-                print()
+                for rank, result in enumerate(results, 1):
+                    filename = result["filename"]
+                    filepath = result["filepath"]
+                    score = result["score"]
+                    print(f"  {rank}. {filename}")
+                    print(f"      Path: {filepath}")
+                    print(f"      Score: {score:.4f}\n")
 
         except KeyboardInterrupt:
             print("\n\nGoodbye!")
             break
         except Exception as e:
             print(f"  ✗ Error: {e}\n")
+            import traceback
+
+            traceback.print_exc()
 
 
 if __name__ == "__main__":
