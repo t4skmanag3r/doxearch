@@ -8,6 +8,7 @@ from doxearch.doc_index.sqlite_index.exceptions import (
     InvalidTermFrequencyError,
 )
 from doxearch.doc_index.sqlite_index.sqlite_index import (
+    Document,
     DocumentFrequency,
     InvertedIndex,
 )
@@ -57,6 +58,9 @@ class Doxearch:
             list(file_hashes.values())
         )
 
+        # Clean up documents that no longer exist in the folder
+        self._cleanup_missing_documents(folder_path, set(file_hashes.values()))
+
         # Filter files that don't exist in the index
         filtered_files = [
             Path(file_path)
@@ -82,6 +86,43 @@ class Doxearch:
                 pass
 
         print(f"\nIndexed {indexed_documents} documents.")
+
+    def _cleanup_missing_documents(
+        self, folder_path: Path, current_file_hashes: set[str]
+    ):
+        """
+        Remove documents from the index that no longer exist in the specified folder.
+
+        Args:
+            folder_path: The folder being indexed
+            current_file_hashes: Set of file hashes for files currently in the folder
+        """
+
+        removed_count = 0
+        folder_path_str = str(folder_path.resolve())
+
+        with self.index.get_session() as session:
+            # Get all documents that belong to this folder
+            documents_in_folder = (
+                session.query(Document)
+                .filter(Document.file_path.like(f"{folder_path_str}%"))
+                .all()
+            )
+
+            # Find documents that no longer exist
+            for doc in documents_in_folder:
+                if doc.doc_id not in current_file_hashes:
+                    # Verify the file actually doesn't exist
+                    if not Path(doc.file_path).exists():
+                        try:
+                            self.index.remove_document(doc.doc_id)
+                            removed_count += 1
+                            print(f"Removed missing document: {doc.filename}")
+                        except Exception as e:
+                            print(f"Failed to remove document {doc.filename}: {e}")
+
+        if removed_count > 0:
+            print(f"\nRemoved {removed_count} missing documents from index.")
 
     def search(self, query: str, top_k: int = 10) -> list[dict[str, str | float]]:
         """

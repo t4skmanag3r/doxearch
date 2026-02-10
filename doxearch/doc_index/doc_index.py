@@ -38,10 +38,6 @@ class DocIndex(ABC):
     def get_document_count(self) -> int:
         """Get the total number of documents in the index."""
 
-    @abstractmethod
-    def reindex(self) -> None:
-        """Reindex all documents."""
-
     def __contains__(self, document_id: str) -> bool:
         """Allow 'document_id in index' syntax."""
         return self.document_exists(document_id)

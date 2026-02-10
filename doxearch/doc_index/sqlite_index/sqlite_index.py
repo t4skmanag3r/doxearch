@@ -501,5 +501,3 @@ class SQLiteIndex(DocIndex):
         """
         with self.get_session() as session:
             return session.query(Document).count()
-
-    def reindex(self) -> None: ...
