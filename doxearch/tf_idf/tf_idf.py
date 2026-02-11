@@ -19,7 +19,7 @@ def compute_idf(n_docs: int, doc_term_count: int) -> float:
     return math.log10(n_docs / doc_term_count)
 
 
-def compute_tf_idf(tf: int, idf: int) -> float:
+def compute_tf_idf(tf: float, idf: float) -> float:
     """Compute the TF-IDF score for a term in a document.
     TF-IDF = TF * IDF
     """

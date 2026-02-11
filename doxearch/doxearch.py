@@ -7,11 +7,6 @@ from doxearch.doc_index.sqlite_index.exceptions import (
     DocumentExistsError,
     InvalidTermFrequencyError,
 )
-from doxearch.doc_index.sqlite_index.sqlite_index import (
-    Document,
-    DocumentFrequency,
-    InvertedIndex,
-)
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
@@ -87,140 +82,92 @@ class Doxearch:
 
         print(f"\nIndexed {indexed_documents} documents.")
 
-    def _cleanup_missing_documents(
-        self, folder_path: Path, current_file_hashes: set[str]
-    ):
-        """
-        Remove documents from the index that no longer exist in the specified folder.
-
-        Args:
-            folder_path: The folder being indexed
-            current_file_hashes: Set of file hashes for files currently in the folder
-        """
-
-        removed_count = 0
-        folder_path_str = str(folder_path.resolve())
-
-        with self.index.get_session() as session:
-            # Get all documents that belong to this folder
-            documents_in_folder = (
-                session.query(Document)
-                .filter(Document.file_path.like(f"{folder_path_str}%"))
-                .all()
-            )
-
-            # Find documents that no longer exist
-            for doc in documents_in_folder:
-                if doc.doc_id not in current_file_hashes:
-                    # Verify the file actually doesn't exist
-                    if not Path(doc.file_path).exists():
-                        try:
-                            self.index.remove_document(doc.doc_id)
-                            removed_count += 1
-                            print(f"Removed missing document: {doc.filename}")
-                        except Exception as e:
-                            print(f"Failed to remove document {doc.filename}: {e}")
-
-        if removed_count > 0:
-            print(f"\nRemoved {removed_count} missing documents from index.")
-
     def search(self, query: str, top_k: int = 10) -> list[dict[str, str | float]]:
-        """
-        Search for documents relevant to the query using pre-computed normalized TF-IDF scores.
+        """Search for documents using the abstract index interface."""
 
-        Args:
-            query: The search query string
-            top_k: Number of top results to return (default: 10)
-
-        Returns:
-            List of dictionaries containing document metadata and scores:
-            [
-                {
-                    "doc_id": str,
-                    "filename": str,
-                    "filepath": str,
-                    "score": float
-                },
-                ...
-            ]
-            Sorted by relevance score in descending order
-        """
-
-        # Tokenize the query
         query_tokens = self.tokenizer.tokenize(query)
         if not query_tokens:
             return []
 
-        # Get unique query terms
         query_terms = list(set(query_tokens))
-
-        # Get total document count for IDF calculation
         total_docs = self.index.get_document_count()
         if total_docs == 0:
             return []
 
-        # Dictionary to store document scores: {doc_id: score}
         doc_scores = {}
 
-        with self.index.get_session() as session:
-            # Fetch all document frequencies in one query
-            df_entries = (
-                session.query(DocumentFrequency)
-                .filter(DocumentFrequency.term.in_(query_terms))
-                .all()
-            )
+        # Use abstract interface methods instead of direct SQLAlchemy queries
+        term_frequencies = self.index.get_term_frequencies(query_terms)
 
-            # Create a mapping of term -> idf
-            term_idf = {}
-            for df_entry in df_entries:
-                idf = compute_idf(total_docs, df_entry.doc_count)
-                term_idf[df_entry.term] = idf
+        # Create term -> IDF mapping
+        term_idf = {}
+        for tf in term_frequencies:
+            idf = compute_idf(total_docs, tf.doc_count)
+            term_idf[tf.term] = idf
 
-            # Skip if no query terms found in corpus
-            if not term_idf:
-                return []
+        if not term_idf:
+            return []
 
-            # Fetch all relevant postings in one query
-            # Now we use the pre-computed normalized_tf instead of raw term_frequency
-            postings = (
-                session.query(InvertedIndex)
-                .filter(InvertedIndex.term.in_(term_idf.keys()))
-                .all()
-            )
+        # Get postings using abstract interface
+        postings = self.index.get_postings(list(term_idf.keys()))
 
-            # Calculate TF-IDF scores using pre-normalized TF values
-            for posting in postings:
-                idf = term_idf[posting.term]
+        # Calculate TF-IDF scores
+        for posting in postings:
+            idf = term_idf[posting.term]
+            tf_idf_score = compute_tf_idf(posting.normalized_tf, idf)
 
-                # Use pre-computed normalized TF - no need to fetch document metadata!
-                tf_idf_score = compute_tf_idf(posting.normalized_tf, idf)
+            if posting.doc_id in doc_scores:
+                doc_scores[posting.doc_id] += tf_idf_score
+            else:
+                doc_scores[posting.doc_id] = tf_idf_score
 
-                # Accumulate score for this document
-                if posting.doc_id in doc_scores:
-                    doc_scores[posting.doc_id] += tf_idf_score
-                else:
-                    doc_scores[posting.doc_id] = tf_idf_score
-
-        # Sort documents by score in descending order
+        # Sort and get top results
         sorted_doc_ids = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[
             :top_k
         ]
 
-        # Fetch document metadata for top results
-        results = []
-        with self.index.get_session() as session:
-            from doxearch.doc_index.sqlite_index.sqlite_index import Document
+        # Fetch metadata using abstract interface
+        doc_ids = [doc_id for doc_id, _ in sorted_doc_ids]
+        documents_metadata = self.index.get_documents_metadata(doc_ids)
 
-            for doc_id, score in sorted_doc_ids:
-                doc = session.query(Document).filter_by(doc_id=doc_id).first()
-                if doc:
-                    results.append(
-                        {
-                            "doc_id": doc_id,
-                            "filename": doc.filename,
-                            "filepath": doc.file_path,
-                            "score": score,
-                        }
-                    )
+        # Create lookup dict for O(1) access
+        metadata_dict = {doc.doc_id: doc for doc in documents_metadata}
+
+        # Build results
+        results = []
+        for doc_id, score in sorted_doc_ids:
+            if doc_id in metadata_dict:
+                doc = metadata_dict[doc_id]
+                results.append(
+                    {
+                        "doc_id": doc_id,
+                        "filename": doc.filename,
+                        "filepath": doc.file_path,
+                        "score": score,
+                    }
+                )
 
         return results
+
+    def _cleanup_missing_documents(
+        self, folder_path: Path, current_file_hashes: set[str]
+    ):
+        """Remove documents that no longer exist in the folder."""
+        removed_count = 0
+        folder_path_str = str(folder_path.resolve())
+
+        # Use abstract interface instead of direct session access
+        documents_in_folder = self.index.get_documents_by_folder(folder_path_str)
+
+        for doc in documents_in_folder:
+            if doc.doc_id not in current_file_hashes:
+                if not Path(doc.file_path).exists():
+                    try:
+                        self.index.remove_document(doc.doc_id)
+                        removed_count += 1
+                        print(f"Removed missing document: {doc.filename}")
+                    except Exception as e:
+                        print(f"Failed to remove document {doc.filename}: {e}")
+
+        if removed_count > 0:
+            print(f"\nRemoved {removed_count} missing documents from index.")

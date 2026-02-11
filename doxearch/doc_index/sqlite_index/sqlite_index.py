@@ -14,6 +14,11 @@ from doxearch.doc_index.sqlite_index.exceptions import (
     InvalidFilePathError,
     InvalidTermFrequencyError,
 )
+from doxearch.doc_index.types import (
+    DocumentMetadata,
+    TermDocumentPosting,
+    TermFrequency,
+)
 
 Base = declarative_base()
 
@@ -501,3 +506,72 @@ class SQLiteIndex(DocIndex):
         """
         with self.get_session() as session:
             return session.query(Document).count()
+
+    def get_term_frequencies(self, terms: list[str]) -> list[TermFrequency]:
+        """Get document frequency information for multiple terms."""
+        with self.get_session() as session:
+            df_entries = (
+                session.query(DocumentFrequency)
+                .filter(DocumentFrequency.term.in_(terms))
+                .all()
+            )
+
+            return [
+                TermFrequency(term=df.term, doc_count=df.doc_count) for df in df_entries
+            ]
+
+    def get_postings(self, terms: list[str]) -> list[TermDocumentPosting]:
+        """Get all postings for the given terms."""
+        with self.get_session() as session:
+            postings = (
+                session.query(InvertedIndex).filter(InvertedIndex.term.in_(terms)).all()
+            )
+
+            return [
+                TermDocumentPosting(
+                    term=p.term,
+                    doc_id=p.doc_id,
+                    normalized_tf=p.normalized_tf,
+                )
+                for p in postings
+            ]
+
+    def get_documents_metadata(self, doc_ids: list[str]) -> list[DocumentMetadata]:
+        """Get metadata for multiple documents."""
+        with self.get_session() as session:
+            documents = (
+                session.query(Document).filter(Document.doc_id.in_(doc_ids)).all()
+            )
+
+            return [
+                DocumentMetadata(
+                    doc_id=doc.doc_id,
+                    filename=doc.filename,
+                    file_path=doc.file_path,
+                    term_count=doc.term_count,
+                    unique_terms=doc.unique_terms,
+                    last_indexed=doc.last_indexed,
+                )
+                for doc in documents
+            ]
+
+    def get_documents_by_folder(self, folder_path: str) -> list[DocumentMetadata]:
+        """Get all documents in a specific folder."""
+        with self.get_session() as session:
+            documents = (
+                session.query(Document)
+                .filter(Document.file_path.like(f"{folder_path}%"))
+                .all()
+            )
+
+            return [
+                DocumentMetadata(
+                    doc_id=doc.doc_id,
+                    filename=doc.filename,
+                    file_path=doc.file_path,
+                    term_count=doc.term_count,
+                    unique_terms=doc.unique_terms,
+                    last_indexed=doc.last_indexed,
+                )
+                for doc in documents
+            ]
