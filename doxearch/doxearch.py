@@ -1,12 +1,9 @@
 import platform
+import time
+from collections import Counter
 from pathlib import Path
-from typing import Counter
 
 from doxearch.doc_index.doc_index import DocIndex
-from doxearch.doc_index.sqlite_index.exceptions import (
-    DocumentExistsError,
-    InvalidTermFrequencyError,
-)
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
@@ -34,53 +31,332 @@ def get_app_data_dir() -> Path:
 
 
 class Doxearch:
-    def __init__(self, index: DocIndex, tokenizer: Tokenizer):
+    def __init__(
+        self,
+        index: DocIndex,
+        tokenizer: Tokenizer,
+    ):
+        """Initialize Doxearch.
+
+        Args:
+            index: Document index instance
+            tokenizer: Tokenizer instance for processing documents and search queries
+        """
         self.index = index
         self.tokenizer = tokenizer
         self.pdf_doc_parser = PDFParser()
 
-    def index_folder(self, folder_path: Path):
-        indexed_documents = 0
+    def index_folder(self, folder_path: Path, batch_size: int = 100):
+        """Index all PDF documents in a folder using batch database operations.
+
+        Args:
+            folder_path: Path to folder containing PDFs
+            batch_size: Number of documents to insert in a single batch (default: 100)
+        """
+        start_time = time.time()
         files = list(folder_path.rglob("*.pdf"))
 
-        # Compute hashes for all files
+        print(f"Found {len(files)} PDF files to process\n")
+
+        # Compute file hashes
+        file_hashes, hash_time = self._compute_file_hashes(files)
+
+        # Check which documents already exist
+        documents_exist, check_time = self._check_existing_documents(file_hashes)
+
+        # Clean up documents that no longer exist
+        cleanup_time = self._cleanup_documents(folder_path, set(file_hashes.values()))
+
+        # Filter files that need to be indexed
+        filtered_files = self._filter_new_files(file_hashes, documents_exist)
+
+        if not filtered_files:
+            print("No new documents to index.")
+            return
+
+        print(f"Processing {len(filtered_files)} new documents\n")
+
+        # Process and index documents in batches
+        indexed_count, skipped_count, parse_time, tokenize_time, index_time = (
+            self._process_and_index_documents(filtered_files, file_hashes, batch_size)
+        )
+
+        total_time = time.time() - start_time
+
+        # Print summary
+        self._print_indexing_summary(
+            total_files=len(files),
+            indexed_count=indexed_count,
+            skipped_count=skipped_count,
+            hash_time=hash_time,
+            check_time=check_time,
+            cleanup_time=cleanup_time,
+            parse_time=parse_time,
+            tokenize_time=tokenize_time,
+            index_time=index_time,
+            total_time=total_time,
+        )
+
+    def _compute_file_hashes(self, files: list[Path]) -> tuple[dict[str, str], float]:
+        """Compute hashes for all files.
+
+        Args:
+            files: List of file paths
+
+        Returns:
+            Tuple of (file_path -> hash mapping, time taken)
+        """
+        hash_start = time.time()
         file_hashes = {
             str(file_path): compute_file_hash(file_path) for file_path in files
         }
+        hash_time = time.time() - hash_start
 
-        # Check which documents already exist using their hashes
+        print(
+            f"Hash computation took: {hash_time:.2f}s "
+            f"({hash_time/len(files)*1000:.1f}ms per file)"
+        )
+
+        return file_hashes, hash_time
+
+    def _check_existing_documents(
+        self, file_hashes: dict[str, str]
+    ) -> tuple[dict[str, bool], float]:
+        """Check which documents already exist in the index.
+
+        Args:
+            file_hashes: Mapping of file paths to their hashes
+
+        Returns:
+            Tuple of (hash -> exists mapping, time taken)
+        """
+        check_start = time.time()
         documents_exist = self.index.check_bulk_documents_exist(
             list(file_hashes.values())
         )
+        check_time = time.time() - check_start
 
-        # Clean up documents that no longer exist in the folder
-        self._cleanup_missing_documents(folder_path, set(file_hashes.values()))
+        print(f"Bulk existence check took: {check_time:.2f}s")
 
-        # Filter files that don't exist in the index
-        filtered_files = [
+        return documents_exist, check_time
+
+    def _cleanup_documents(
+        self, folder_path: Path, current_file_hashes: set[str]
+    ) -> float:
+        """Clean up documents that no longer exist in the folder.
+
+        Args:
+            folder_path: Path to the folder being indexed
+            current_file_hashes: Set of hashes for files currently in the folder
+
+        Returns:
+            Time taken for cleanup
+        """
+        cleanup_start = time.time()
+        self._cleanup_missing_documents(folder_path, current_file_hashes)
+        cleanup_time = time.time() - cleanup_start
+
+        print(f"Cleanup took: {cleanup_time:.2f}s\n")
+
+        return cleanup_time
+
+    def _filter_new_files(
+        self, file_hashes: dict[str, str], documents_exist: dict[str, bool]
+    ) -> list[Path]:
+        """Filter files that don't exist in the index.
+
+        Args:
+            file_hashes: Mapping of file paths to their hashes
+            documents_exist: Mapping of hashes to existence status
+
+        Returns:
+            List of file paths that need to be indexed
+        """
+        return [
             Path(file_path)
             for file_path, file_hash in file_hashes.items()
             if not documents_exist[file_hash]
         ]
 
-        for file_path in filtered_files:
+    def _process_and_index_documents(
+        self, files: list[Path], file_hashes: dict[str, str], batch_size: int
+    ) -> tuple[int, int, float, float, float]:
+        """Process documents and index them in batches.
+
+        Args:
+            files: List of file paths to process
+            file_hashes: Mapping of file paths to their hashes
+            batch_size: Number of documents per batch
+
+        Returns:
+            Tuple of (indexed_count, skipped_count, parse_time, tokenize_time, index_time)
+        """
+        documents_batch = []
+        indexed_count = 0
+        skipped_count = 0
+        parse_time = 0
+        tokenize_time = 0
+        index_time = 0
+
+        for file_path in files:
             try:
-                text = self.pdf_doc_parser.parse(file_path)
-                tokens = self.tokenizer.tokenize(text)
-                # Use Counter to get raw term counts (int), not normalized frequencies (float)
-                term_counts = dict(Counter(tokens))
-
-                # Use file hash as document ID
+                # Parse and tokenize document
                 doc_id = file_hashes[str(file_path)]
-                filename = file_path.name
+                term_counts, parse_duration, tokenize_duration = (
+                    self._parse_and_tokenize_document(file_path)
+                )
 
-                self.index.add_document(doc_id, term_counts, filename, str(file_path))
-                indexed_documents += 1
-                print(f"Indexed document: {file_path.name}")
-            except (DocumentExistsError, InvalidTermFrequencyError):
-                pass
+                parse_time += parse_duration
+                tokenize_time += tokenize_duration
 
-        print(f"\nIndexed {indexed_documents} documents.")
+                if term_counts is None:
+                    skipped_count += 1
+                    continue
+
+                # Add to batch
+                documents_batch.append(
+                    (doc_id, term_counts, file_path.name, str(file_path))
+                )
+
+                # Insert batch when it reaches batch_size
+                if len(documents_batch) >= batch_size:
+                    batch_index_time = self._index_batch(documents_batch)
+                    index_time += batch_index_time
+                    indexed_count += len(documents_batch)
+                    print(f"Indexed batch: {indexed_count}/{len(files)}")
+                    documents_batch = []
+
+            except Exception as e:
+                print(f"Error processing {file_path.name}: {e}")
+                skipped_count += 1
+
+        # Insert remaining documents
+        if documents_batch:
+            batch_index_time = self._index_batch(documents_batch)
+            index_time += batch_index_time
+            indexed_count += len(documents_batch)
+            print(f"Indexed final batch: {indexed_count}/{len(files)}")
+
+        return indexed_count, skipped_count, parse_time, tokenize_time, index_time
+
+    def _parse_and_tokenize_document(
+        self, file_path: Path
+    ) -> tuple[dict[str, int] | None, float, float]:
+        """Parse and tokenize a single document.
+
+        Args:
+            file_path: Path to the document
+
+        Returns:
+            Tuple of (term_counts or None if skipped, parse_time, tokenize_time)
+        """
+        # Parse PDF
+        parse_start = time.time()
+        text = self.pdf_doc_parser.parse(file_path)
+        parse_time = time.time() - parse_start
+
+        if not text.strip():
+            print(f"Skipped empty document: {file_path.name}")
+            return None, parse_time, 0
+
+        # Tokenize
+        tokenize_start = time.time()
+        tokens = self.tokenizer.tokenize(text)
+        tokenize_time = time.time() - tokenize_start
+
+        if not tokens:
+            print(f"Skipped document with no tokens: {file_path.name}")
+            return None, parse_time, tokenize_time
+
+        term_counts = dict(Counter(tokens))
+
+        # Log successful processing
+        print(
+            f"Processed: {file_path.name} "
+            f"(parse: {parse_time*1000:.0f}ms, "
+            f"tokenize: {tokenize_time*1000:.0f}ms, "
+            f"terms: {len(term_counts)} unique)"
+        )
+
+        return term_counts, parse_time, tokenize_time
+
+    def _print_indexing_summary(
+        self,
+        total_files: int,
+        indexed_count: int,
+        skipped_count: int,
+        hash_time: float,
+        check_time: float,
+        cleanup_time: float,
+        parse_time: float,
+        tokenize_time: float,
+        index_time: float,
+        total_time: float,
+    ):
+        """Print a summary of the indexing operation.
+
+        Args:
+            total_files: Total number of files found
+            indexed_count: Number of documents successfully indexed
+            skipped_count: Number of documents skipped
+            hash_time: Time spent computing hashes
+            check_time: Time spent checking existing documents
+            cleanup_time: Time spent cleaning up missing documents
+            parse_time: Time spent parsing PDFs
+            tokenize_time: Time spent tokenizing
+            index_time: Time spent indexing
+            total_time: Total time for the entire operation
+        """
+        print("\n" + "=" * 60)
+        print("=== Indexing Summary ===")
+        print("=" * 60)
+        print(f"\nTotal files found: {total_files}")
+        print(f"Documents indexed: {indexed_count}")
+        print(f"Documents skipped: {skipped_count}")
+        print("\n--- Timing Breakdown ---")
+        print(
+            f"Hash computation:    {hash_time:.2f}s ({hash_time/total_time*100:.1f}%)"
+        )
+        print(
+            f"Existence check:     {check_time:.2f}s ({check_time/total_time*100:.1f}%)"
+        )
+        print(
+            f"Cleanup:             {cleanup_time:.2f}s ({cleanup_time/total_time*100:.1f}%)"
+        )
+
+        if indexed_count > 0:
+            print(
+                f"PDF parsing:         {parse_time:.2f}s ({parse_time/total_time*100:.1f}%)"
+            )
+            print(
+                f"Tokenization:        {tokenize_time:.2f}s ({tokenize_time/total_time*100:.1f}%)"
+            )
+            print(
+                f"Database indexing:   {index_time:.2f}s ({index_time/total_time*100:.1f}%)"
+            )
+            print("\n--- Per Document Averages ---")
+            print(f"Parse time:          {parse_time/indexed_count*1000:.1f}ms")
+            print(f"Tokenize time:       {tokenize_time/indexed_count*1000:.1f}ms")
+            print(f"Index time:          {index_time/indexed_count*1000:.1f}ms")
+
+        print(f"\nTotal time:          {total_time:.2f}s")
+        print(f"Throughput:          {indexed_count/total_time:.1f} docs/sec")
+        print("=" * 60)
+
+    def _index_batch(
+        self, documents_batch: list[tuple[str, dict[str, int], str, str]]
+    ) -> float:
+        """Index a batch of documents.
+
+        Args:
+            documents_batch: List of (doc_id, term_counts, filename, filepath) tuples
+
+        Returns:
+            Time taken to index the batch
+        """
+        index_start = time.time()
+        self.index.add_documents_batch(documents_batch)
+        return time.time() - index_start
 
     def search(self, query: str, top_k: int = 10) -> list[dict[str, str | float]]:
         """Search for documents using the abstract index interface."""

@@ -1,3 +1,6 @@
+# pyright: reportAttributeAccessIssue=false
+# pyright: reportArgumentType=false
+
 import math
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -566,12 +569,154 @@ class SQLiteIndex(DocIndex):
 
             return [
                 DocumentMetadata(
-                    doc_id=doc.doc_id,
-                    filename=doc.filename,
-                    file_path=doc.file_path,
-                    term_count=doc.term_count,
-                    unique_terms=doc.unique_terms,
-                    last_indexed=doc.last_indexed,
+                    doc_id=str(doc.doc_id),
+                    filename=str(doc.filename),
+                    file_path=str(doc.file_path),
+                    term_count=int(doc.term_count),
+                    unique_terms=int(doc.unique_terms),
+                    last_indexed=int(doc.last_indexed),
                 )
                 for doc in documents
             ]
+
+    def add_documents_batch(
+        self, documents: list[tuple[str, dict[str, int], str, str]]
+    ) -> None:
+        """
+        Add multiple documents in a single transaction (bulk operation).
+
+        This is significantly faster than calling add_document() multiple times
+        because it uses a single database transaction and batches operations.
+
+        Args:
+            documents: List of (document_id, term_frequencies, filename, filepath) tuples
+
+        Raises:
+            InvalidDocumentIdError: If any document_id is invalid
+            InvalidTermFrequencyError: If any term_frequencies is invalid
+            InvalidFilePathError: If any filepath is invalid
+            DocumentExistsError: If any document_id already exists
+            DatabaseOperationError: If the batch operation fails
+        """
+        if not documents:
+            return
+
+        with self.get_session() as session:
+            try:
+                # Validate all documents first (fail fast)
+                for doc_id, term_freq, filename, filepath in documents:
+                    self._validate_add_document_inputs(doc_id, term_freq, filepath)
+                    self._validate_document_id(session, doc_id)
+
+                # Aggregate all term frequencies across all documents
+                global_term_frequencies: dict[str, int] = {}
+                global_term_doc_counts: dict[str, int] = {}
+
+                for doc_id, term_freq, filename, filepath in documents:
+                    for term, freq in term_freq.items():
+                        global_term_frequencies[term] = (
+                            global_term_frequencies.get(term, 0) + freq
+                        )
+                        global_term_doc_counts[term] = (
+                            global_term_doc_counts.get(term, 0) + 1
+                        )
+
+                # Bulk insert document records
+                doc_records = []
+                for doc_id, term_freq, filename, filepath in documents:
+                    total_terms = sum(term_freq.values())
+                    unique_terms = len(term_freq)
+
+                    doc_records.append(
+                        Document(
+                            doc_id=doc_id,
+                            term_count=total_terms,
+                            unique_terms=unique_terms,
+                            filename=filename,
+                            file_path=filepath,
+                            last_indexed=int(datetime.now(timezone.utc).timestamp()),
+                        )
+                    )
+
+                session.bulk_save_objects(doc_records)
+                session.flush()
+
+                # Update document frequencies in bulk
+                existing_terms = (
+                    session.query(DocumentFrequency)
+                    .filter(DocumentFrequency.term.in_(global_term_frequencies.keys()))
+                    .all()
+                )
+
+                existing_term_map = {df.term: df for df in existing_terms}
+                new_df_records = []
+
+                for term, total_freq in global_term_frequencies.items():
+                    doc_count_increment = global_term_doc_counts[term]
+
+                    if term in existing_term_map:
+                        # Update existing term
+                        df_entry = existing_term_map[term]
+                        df_entry.doc_count += doc_count_increment
+                        df_entry.total_frequency += total_freq
+                    else:
+                        # Create new term entry
+                        new_df_records.append(
+                            DocumentFrequency(
+                                term=term,
+                                doc_count=doc_count_increment,
+                                total_frequency=total_freq,
+                            )
+                        )
+
+                if new_df_records:
+                    session.bulk_save_objects(new_df_records)
+
+                session.flush()
+
+                # Bulk insert inverted index entries
+                inverted_records = []
+                for doc_id, term_freq, filename, filepath in documents:
+                    doc_length = sum(term_freq.values())
+
+                    for term, frequency in term_freq.items():
+                        normalized_tf = frequency / math.sqrt(doc_length)
+
+                        inverted_records.append(
+                            InvertedIndex(
+                                term=term,
+                                doc_id=doc_id,
+                                term_frequency=frequency,
+                                normalized_tf=normalized_tf,
+                            )
+                        )
+
+                session.bulk_save_objects(inverted_records)
+                session.flush()
+
+                # Update corpus statistics
+                total_docs_stat = (
+                    session.query(CorpusStats)
+                    .filter_by(stat_name="total_documents")
+                    .first()
+                )
+
+                num_new_docs = len(documents)
+                if total_docs_stat:
+                    total_docs_stat.stat_value += num_new_docs
+                else:
+                    session.add(
+                        CorpusStats(
+                            stat_name="total_documents", stat_value=num_new_docs
+                        )
+                    )
+
+                session.commit()
+
+            except Exception as e:
+                session.rollback()
+                from doxearch.doc_index.sqlite_index.exceptions import (
+                    DatabaseOperationError,
+                )
+
+                raise DatabaseOperationError("add_documents_batch", e) from e

@@ -109,3 +109,11 @@ class DocIndex(ABC):
         Context manager for database sessions (if applicable).
         For non-database implementations, this can be a no-op.
         """
+
+    @abstractmethod
+    def add_documents_batch(
+        self, documents: list[tuple[str, dict[str, int], str, str]]
+    ) -> None:
+        """
+        Add multiple documents in a single transaction (bulk operation).
+        """

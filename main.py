@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from doxearch.doc_index.sqlite_index.sqlite_index import SQLiteIndex
+from doxearch.doc_index.sqlite_index.sqlite_index import Document, SQLiteIndex
 from doxearch.doxearch import Doxearch, get_app_data_dir
 from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
 
@@ -14,8 +14,12 @@ def main():
         app_data_dir = get_app_data_dir()
         db_path = app_data_dir / "doxearch.db"
         index = SQLiteIndex(db_path=str(db_path))
-        tokenizer = SpacyTokenizer(model="lt_core_news_sm")
-        doxearch = Doxearch(index, tokenizer)
+        # Disable parser and NER for faster tokenization
+        tokenizer = SpacyTokenizer(model="lt_core_news_sm", disable=["parser", "ner"])
+        doxearch = Doxearch(
+            index,
+            tokenizer,
+        )
         print("✓ Doxearch initialized successfully")
         print(f"✓ Database location: {doxearch.index.engine.url}")
     except Exception as e:
@@ -52,9 +56,10 @@ def main():
         print(f"  - {pdf.name}")
     print()
 
-    # Index the folder
+    # Index the folder with larger batch size for better throughput
     print("=== Starting Indexing Process ===\n")
     try:
+        # doxearch.index_folder(test_folder, max_workers=4, batch_size=100)
         doxearch.index_folder(test_folder)
         print("\n✓ Indexing completed successfully!")
     except Exception as e:
@@ -72,7 +77,6 @@ def main():
     # Show some sample documents from the index
     print("\n=== Sample Indexed Documents ===")
     with doxearch.index.get_session() as session:
-        from doxearch.doc_index.sqlite_index.sqlite_index import Document
 
         documents = session.query(Document).limit(5).all()
         for doc in documents:
