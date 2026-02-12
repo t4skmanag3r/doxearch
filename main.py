@@ -16,7 +16,9 @@ def main():
         index = SQLiteIndex(db_path=str(db_path))
         # Disable parser and NER for faster tokenization
         tokenizer = SpacyTokenizer(model="lt_core_news_sm", disable=["parser", "ner"])
+        test_folder = Path("/run/media/eleos/CORSAIR/Isakymai/")
         doxearch = Doxearch(
+            test_folder,
             index,
             tokenizer,
         )
@@ -60,7 +62,7 @@ def main():
     print("=== Starting Indexing Process ===\n")
     try:
         # doxearch.index_folder(test_folder, max_workers=4, batch_size=100)
-        doxearch.index_folder(test_folder)
+        doxearch.index_folder()
         print("\n✓ Indexing completed successfully!")
     except Exception as e:
         print(f"\n✗ Error during indexing: {e}")

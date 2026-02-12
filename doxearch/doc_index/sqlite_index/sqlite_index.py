@@ -462,6 +462,43 @@ class SQLiteIndex(DocIndex):
         # Add the document back with new data
         self.add_document(document_id, term_frequencies, filename, filepath)
 
+    def update_document_file_path(
+        self, document_id: str, filename: str, filepath: str
+    ) -> None:
+        """Update the file path of a document in the index.
+
+        This method updates only the filename and filepath of an existing document
+        without modifying its term frequencies or other statistics.
+
+        Args:
+            document_id (str): Unique identifier of the document to update
+            filename (str): New filename for the document
+            filepath (str): New file path for the document
+
+        Raises:
+            InvalidDocumentIdError: If document_id is empty or None
+            InvalidFilePathError: If filepath is empty or None
+            DocumentNotFoundError: If document_id does not exist in the index
+        """
+        if not document_id or not isinstance(document_id, str):
+            raise InvalidDocumentIdError("Document ID must be a non-empty string")
+
+        if not filepath or not isinstance(filepath, str):
+            raise InvalidFilePathError("File path must be a non-empty string")
+
+        with self.get_session() as session:
+            # Verify document exists
+            document = session.query(Document).filter_by(doc_id=document_id).first()
+            if not document:
+                raise DocumentNotFoundError(document_id)
+
+            # Update filename and filepath
+            document.filename = filename
+            document.file_path = filepath
+            document.last_indexed = int(datetime.now(timezone.utc).timestamp())
+
+            session.commit()
+
     def document_exists(self, document_id: str) -> bool:
         """Check if a document exists in the index.
         Args:

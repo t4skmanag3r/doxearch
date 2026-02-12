@@ -35,6 +35,12 @@ class DocIndex(ABC):
         """Update an existing document in the index."""
 
     @abstractmethod
+    def update_document_file_path(
+        self, document_id: str, filename: str, filepath: str
+    ) -> None:
+        """Update the file path of a document in the index."""
+
+    @abstractmethod
     def document_exists(self, document_id: str) -> bool:
         """Check if a document exists in the index."""
 

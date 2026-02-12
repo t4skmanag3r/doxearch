@@ -1,3 +1,4 @@
+import os
 import platform
 import time
 from collections import Counter
@@ -33,28 +34,30 @@ def get_app_data_dir() -> Path:
 class Doxearch:
     def __init__(
         self,
+        folder_path: Path,
         index: DocIndex,
         tokenizer: Tokenizer,
     ):
         """Initialize Doxearch.
 
         Args:
+            folder_path: Path to folder containing documents
             index: Document index instance
             tokenizer: Tokenizer instance for processing documents and search queries
         """
+        self.folder_path = folder_path
         self.index = index
         self.tokenizer = tokenizer
         self.pdf_doc_parser = PDFParser()
 
-    def index_folder(self, folder_path: Path, batch_size: int = 100):
+    def index_folder(self, batch_size: int = 100):
         """Index all PDF documents in a folder using batch database operations.
 
         Args:
-            folder_path: Path to folder containing PDFs
             batch_size: Number of documents to insert in a single batch (default: 100)
         """
         start_time = time.time()
-        files = list(folder_path.rglob("*.pdf"))
+        files = list(self.folder_path.rglob("*.pdf"))
 
         print(f"Found {len(files)} PDF files to process\n")
 
@@ -65,7 +68,9 @@ class Doxearch:
         documents_exist, check_time = self._check_existing_documents(file_hashes)
 
         # Clean up documents that no longer exist
-        cleanup_time = self._cleanup_documents(folder_path, set(file_hashes.values()))
+        cleanup_time = self._cleanup_documents(
+            self.folder_path, set(file_hashes.values())
+        )
 
         # Filter files that need to be indexed
         filtered_files = self._filter_new_files(file_hashes, documents_exist)
@@ -402,9 +407,21 @@ class Doxearch:
             :top_k
         ]
 
-        # Fetch metadata using abstract interface
+        # Fetch metadata
         doc_ids = [doc_id for doc_id, _ in sorted_doc_ids]
         documents_metadata = self.index.get_documents_metadata(doc_ids)
+
+        # Check if file paths still exist
+        update_files = []
+        for doc in documents_metadata:
+            if not os.path.exists(doc.file_path):
+                update_files.append(doc.doc_id)
+
+        # Update file paths for moved documents
+        if update_files:
+            self._update_moved_or_renamed_documents(update_files)
+            # Fetch updated documents
+            documents_metadata = self.index.get_documents_metadata(doc_ids)
 
         # Create lookup dict for O(1) access
         metadata_dict = {doc.doc_id: doc for doc in documents_metadata}
@@ -424,6 +441,53 @@ class Doxearch:
                 )
 
         return results
+
+    def _update_moved_or_renamed_documents(self, doc_ids: list[str]) -> None:
+        """Find and update file paths/file names for documents that have been moved or renamed.
+
+        Args:
+            doc_ids: List of document IDs (file hashes) whose files no longer exist at their stored paths
+        """
+        if not doc_ids:
+            return
+
+        updated_count = 0
+        not_found_count = 0
+
+        # Get current metadata for documents that need updating
+        documents_metadata = self.index.get_documents_metadata(doc_ids)
+
+        # Get all current PDF files in the folder
+        current_files = list(self.folder_path.rglob("*.pdf"))
+
+        # Compute hashes for all current files
+        print(f"\nSearching for {len(doc_ids)} moved documents...")
+        current_file_hashes = {
+            compute_file_hash(file_path): file_path for file_path in current_files
+        }
+
+        # Try to find each document by its hash
+        for doc in documents_metadata:
+            if doc.doc_id in current_file_hashes:
+                # Found the file in a new location
+                new_file_path = current_file_hashes[doc.doc_id]
+                try:
+                    self.index.update_document_file_path(
+                        doc.doc_id, new_file_path.name, str(new_file_path)
+                    )
+                    updated_count += 1
+                    print(f"Updated path for: {doc.filename} -> {new_file_path}")
+                except Exception as e:
+                    print(f"Failed to update path for {doc.filename}: {e}")
+            else:
+                # File not found anywhere in the folder
+                not_found_count += 1
+                print(f"Document not found in folder: {doc.filename}")
+
+        if updated_count > 0:
+            print(f"\nUpdated {updated_count} moved document(s)")
+        if not_found_count > 0:
+            print(f"Could not locate {not_found_count} document(s)")
 
     def _cleanup_missing_documents(
         self, folder_path: Path, current_file_hashes: set[str]
