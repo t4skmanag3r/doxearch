@@ -1,5 +1,4 @@
 import os
-import platform
 import time
 from collections import Counter
 from pathlib import Path
@@ -9,26 +8,6 @@ from doxearch.doc_parser.parsers.pdf_parser import PDFParser
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
 from doxearch.utils.file_hash import compute_file_hash
-
-
-def get_app_data_dir() -> Path:
-    """Get the appropriate application data directory based on the operating system."""
-    system = platform.system()
-
-    if system == "Windows":
-        # Windows: %APPDATA%\doxearch
-        app_data = Path.home() / "AppData" / "Roaming" / "doxearch"
-    elif system == "Linux":
-        # Linux: ~/.local/share/doxearch
-        app_data = Path.home() / ".local" / "share" / "doxearch"
-    else:
-        # Fallback to home directory
-        app_data = Path.home() / ".doxearch"
-
-    # Create directory if it doesn't exist
-    app_data.mkdir(parents=True, exist_ok=True)
-
-    return app_data
 
 
 class Doxearch:
