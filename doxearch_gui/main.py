@@ -201,10 +201,6 @@ class DoxearchGUI(QMainWindow):
         open_folder_button.clicked.connect(self.open_selected_document_folder)
         button_layout.addWidget(open_folder_button)
 
-        remove_document_button = QPushButton("Remove Document")
-        remove_document_button.clicked.connect(self.remove_selected_document)
-        button_layout.addWidget(remove_document_button)
-
         button_layout.addStretch()
         layout.addLayout(button_layout)
 
@@ -331,74 +327,6 @@ class DoxearchGUI(QMainWindow):
                 QMessageBox.critical(
                     self, "Error Opening Folder", f"Could not open folder:\n{e}"
                 )
-
-    def remove_selected_document(self):
-        """Remove the selected document from the index."""
-        if not self.current_doxearch:
-            QMessageBox.warning(
-                self,
-                "No Active Directory",
-                "Please set an active directory first.",
-            )
-            return
-
-        selected_row = self.documents_table.currentRow()
-        if selected_row < 0:
-            QMessageBox.warning(
-                self, "No Selection", "Please select a document to remove."
-            )
-            return
-
-        filename_item = self.documents_table.item(selected_row, 0)
-        filepath_item = self.documents_table.item(selected_row, 4)
-
-        if not filename_item or not filepath_item:
-            return
-
-        filename = filename_item.text()
-        filepath = filepath_item.text()
-
-        reply = QMessageBox.question(
-            self,
-            "Confirm Removal",
-            f"Are you sure you want to remove this document from the index?\n\n{filename}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-
-        if reply == QMessageBox.StandardButton.No:
-            return
-
-        try:
-            # Get the document ID (which is the file hash)
-            from doxearch.utils.file_hash import compute_file_hash
-
-            if Path(filepath).exists():
-                doc_id = compute_file_hash(filepath)
-            else:
-                # If file doesn't exist, use the new method to find it by filepath
-                doc = self.current_doxearch.index.get_document_by_filepath(filepath)
-                if doc:
-                    doc_id = doc.doc_id
-                else:
-                    raise Exception("Document not found in index")
-
-            # Remove the document from the index
-            self.current_doxearch.index.remove_document(doc_id)
-
-            # Reload the documents table
-            self.load_documents()
-
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Successfully removed document from index:\n{filename}",
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"An error occurred while removing the document:\n{e}",
-            )
 
     def create_search_tab(self) -> QWidget:
         """Create the search tab."""
