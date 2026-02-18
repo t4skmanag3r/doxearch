@@ -186,6 +186,7 @@ class DoxearchGUI(QMainWindow):
             QTableWidget.SelectionBehavior.SelectRows
         )
         self.documents_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.documents_table.setSortingEnabled(True)
         self.documents_table.cellDoubleClicked.connect(self.open_document_file)
         layout.addWidget(self.documents_table)
 
@@ -231,6 +232,9 @@ class DoxearchGUI(QMainWindow):
         try:
             documents = self.current_doxearch.index.get_all_documents()
 
+            # Disable sorting while populating
+            self.documents_table.setSortingEnabled(False)
+
             self.documents_table.setRowCount(len(documents))
             self.document_count_label.setText(f"Total documents: {len(documents)}")
 
@@ -259,6 +263,9 @@ class DoxearchGUI(QMainWindow):
                 path_item = QTableWidgetItem(doc.file_path)
                 path_item.setToolTip("Double-click to open file")
                 self.documents_table.setItem(row, 4, path_item)
+
+            # Re-enable sorting after populating
+            self.documents_table.setSortingEnabled(True)
 
         except Exception as e:
             QMessageBox.critical(
