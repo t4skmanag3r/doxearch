@@ -1,4 +1,5 @@
 import os
+import platform
 import subprocess
 import sys
 from datetime import datetime
@@ -729,6 +730,11 @@ class DoxearchGUI(QMainWindow):
         button_layout.addWidget(remove_button)
 
         button_layout.addStretch()
+
+        open_app_dir_button = QPushButton("Open App Directory")
+        open_app_dir_button.clicked.connect(self.open_app_directory)
+        button_layout.addWidget(open_app_dir_button)
+
         layout.addLayout(button_layout)
 
         # Load directories
@@ -1001,6 +1007,24 @@ class DoxearchGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Directory not found:\n{e}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred:\n{e}")
+
+    def open_app_directory(self):
+        """Open the app directory in the system file manager."""
+        try:
+            app_data_dir = get_app_data_dir()
+
+            # Open directory based on platform
+            if platform.system() == "Windows":
+                subprocess.run(["explorer", str(app_data_dir)])
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", str(app_data_dir)])
+            else:  # Linux and other Unix-like systems
+                subprocess.run(["xdg-open", str(app_data_dir)])
+
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Error", f"Failed to open database directory: {str(e)}"
+            )
 
 
 def main():
