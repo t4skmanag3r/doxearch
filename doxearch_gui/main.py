@@ -61,20 +61,32 @@ class IndexWorker(QThread):
 
 
 class SearchWorker(QThread):
-    """Worker thread for search operations."""
+    """Worker thread for performing searches."""
 
-    finished = pyqtSignal(list)  # search results
-    error = pyqtSignal(str)  # error message
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
 
-    def __init__(self, doxearch: Doxearch, query: str, top_k: int):
+    def __init__(
+        self,
+        doxearch: Doxearch,
+        query: str,
+        top_k: int,
+        use_fuzzy: bool = True,
+    ):
         super().__init__()
         self.doxearch = doxearch
         self.query = query
         self.top_k = top_k
+        self.use_fuzzy = use_fuzzy
 
     def run(self):
+        """Run the search operation."""
         try:
-            results = self.doxearch.search(self.query, top_k=self.top_k)
+            results = self.doxearch.search(
+                self.query,
+                top_k=self.top_k,
+                use_fuzzy=self.use_fuzzy,
+            )
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
@@ -408,16 +420,29 @@ class DoxearchGUI(QMainWindow):
 
         layout.addLayout(search_layout)
 
+        # Search options layout
+        options_layout = QHBoxLayout()
+
         # Top K selector
-        topk_layout = QHBoxLayout()
-        topk_layout.addWidget(QLabel("Number of results:"))
+        options_layout.addWidget(QLabel("Number of results:"))
         self.topk_spinbox = QSpinBox()
         self.topk_spinbox.setMinimum(1)
         self.topk_spinbox.setMaximum(100)
         self.topk_spinbox.setValue(10)
-        topk_layout.addWidget(self.topk_spinbox)
-        topk_layout.addStretch()
-        layout.addLayout(topk_layout)
+        options_layout.addWidget(self.topk_spinbox)
+
+        options_layout.addSpacing(20)
+
+        # Fuzzy search checkbox
+        self.fuzzy_checkbox = QCheckBox("Enable fuzzy matching")
+        self.fuzzy_checkbox.setChecked(True)
+        self.fuzzy_checkbox.setToolTip(
+            "Enable fuzzy matching to find similar terms (helps with typos)"
+        )
+        options_layout.addWidget(self.fuzzy_checkbox)
+
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
 
         # Results area
         layout.addWidget(QLabel("Results:"))
@@ -454,6 +479,51 @@ class DoxearchGUI(QMainWindow):
         layout.addLayout(result_buttons_layout)
 
         return tab
+
+    def perform_search(self):
+        """Perform a search query."""
+        if not self.current_doxearch:
+            QMessageBox.warning(
+                self,
+                "No Active Directory",
+                "Please set an active directory or index a folder first.",
+            )
+            return
+
+        query = self.search_input.text().strip()
+
+        if not query:
+            QMessageBox.warning(self, "Empty Query", "Please enter a search query.")
+            return
+
+        top_k = self.topk_spinbox.value()
+        use_fuzzy = self.fuzzy_checkbox.isChecked()
+
+        # Disable search during operation
+        self.search_button.setEnabled(False)
+        self.results_table.setRowCount(0)
+
+        # First, reindex to catch any changes
+        try:
+            # Run index_folder to update the index with any new/modified files
+            # This is efficient as it only processes new or changed files
+            self.current_doxearch.index_folder()
+        except Exception as e:
+            self.search_button.setEnabled(True)
+            QMessageBox.critical(
+                self,
+                "Indexing Error",
+                f"An error occurred while updating the index:\n{e}",
+            )
+            return
+
+        # Start search in worker thread
+        self.search_worker = SearchWorker(
+            self.current_doxearch, query, top_k, use_fuzzy
+        )
+        self.search_worker.finished.connect(self.on_search_finished)
+        self.search_worker.error.connect(self.on_search_error)
+        self.search_worker.start()
 
     def on_search_finished(self, results: list):
         """Handle search completion."""
@@ -809,53 +879,10 @@ class DoxearchGUI(QMainWindow):
             f"An error occurred during indexing:\n{error_message}",
         )
 
-    def perform_search(self):
-        """Perform a search query."""
-        if not self.current_doxearch:
-            QMessageBox.warning(
-                self,
-                "No Active Directory",
-                "Please set an active directory or index a folder first.",
-            )
-            return
-
-        query = self.search_input.text().strip()
-
-        if not query:
-            QMessageBox.warning(self, "Empty Query", "Please enter a search query.")
-            return
-
-        top_k = self.topk_spinbox.value()
-
-        # Disable search during operation
-        self.search_button.setEnabled(False)
-        self.results_table.setRowCount(0)
-
-        # First, reindex to catch any changes
-        try:
-            # Run index_folder to update the index with any new/modified files
-            # This is efficient as it only processes new or changed files
-            self.current_doxearch.index_folder()
-        except Exception as e:
-            self.search_button.setEnabled(True)
-            QMessageBox.critical(
-                self,
-                "Indexing Error",
-                f"An error occurred while updating the index:\n{e}",
-            )
-            return
-
-        # Start search in worker thread
-        self.search_worker = SearchWorker(self.current_doxearch, query, top_k)
-        self.search_worker.finished.connect(self.on_search_finished)
-        self.search_worker.error.connect(self.on_search_error)
-        self.search_worker.start()
-
     def on_search_error(self, error_message: str):
         """Handle search errors."""
         self.search_button.setEnabled(True)
-        self.results_text.clear()
-        self.results_text.append(f"Error: {error_message}")
+        self.results_table.clear()
 
         QMessageBox.critical(
             self, "Search Error", f"An error occurred during search:\n{error_message}"

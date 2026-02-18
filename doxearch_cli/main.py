@@ -164,6 +164,11 @@ def search(
     interactive: bool = typer.Option(
         False, "--interactive", "-i", help="Enter interactive search mode"
     ),
+    no_fuzzy: bool = typer.Option(
+        False,
+        "--no-fuzzy",
+        help="Disable fuzzy matching (exact matches only)",
+    ),
 ):
     """Search indexed documents."""
     try:
@@ -214,10 +219,15 @@ def search(
             model = "en_core_web_sm"
             console.print(f"[cyan]Using default model:[/cyan] {model}")
 
+        # Show fuzzy matching status
+        use_fuzzy = not no_fuzzy
+        fuzzy_status = "enabled" if use_fuzzy else "disabled"
+        console.print(f"[cyan]Fuzzy matching:[/cyan] {fuzzy_status}")
+
         doxearch = get_doxearch_instance(folder, db_path, model=model)
 
         if interactive:
-            _interactive_search(doxearch)
+            _interactive_search(doxearch, use_fuzzy=use_fuzzy)
             return
 
         # Validate query is provided for non-interactive mode
@@ -230,7 +240,7 @@ def search(
             )
             raise typer.Exit(1)
 
-        _perform_search(doxearch, query, top_k)
+        _perform_search(doxearch, query, top_k, use_fuzzy=use_fuzzy)
 
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
@@ -368,11 +378,11 @@ def remove_directory(
         raise typer.Exit(1)
 
 
-def _perform_search(doxearch: Doxearch, query: str, top_k: int):
+def _perform_search(doxearch: Doxearch, query: str, top_k: int, use_fuzzy: bool = True):
     """Perform a single search and display results."""
     console.print(f"\n[bold cyan]Searching for:[/bold cyan] {query}")
 
-    results = doxearch.search(query, top_k=top_k)
+    results = doxearch.search(query, top_k=top_k, use_fuzzy=use_fuzzy)
 
     if not results:
         console.print("[yellow]No results found[/yellow]")
@@ -395,6 +405,30 @@ def _perform_search(doxearch: Doxearch, query: str, top_k: int):
         console.print(f"   Score: {score:.4f}")
         console.print(f"   Path: {filepath}")
         console.print()
+
+
+def _interactive_search(doxearch: Doxearch, use_fuzzy: bool = True):
+    """Run interactive search mode."""
+    console.print("[bold cyan]Interactive Search Mode[/bold cyan]")
+    fuzzy_status = "enabled" if use_fuzzy else "disabled"
+    console.print(f"[cyan]Fuzzy matching: {fuzzy_status}[/cyan]")
+    console.print("Type your query and press Enter. Type 'exit' or 'quit' to leave.\n")
+
+    while True:
+        try:
+            query = typer.prompt("Search", default="")
+
+            if query.lower() in ["exit", "quit", ""]:
+                console.print("[cyan]Goodbye![/cyan]")
+                break
+
+            _perform_search(doxearch, query, top_k=10, use_fuzzy=use_fuzzy)
+
+        except KeyboardInterrupt:
+            console.print("\n[cyan]Goodbye![/cyan]")
+            break
+        except Exception as e:
+            console.print(f"[bold red]✗ Error:[/bold red] {e}")
 
 
 def _interactive_search(doxearch: Doxearch):

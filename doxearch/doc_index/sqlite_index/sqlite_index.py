@@ -788,3 +788,13 @@ class SQLiteIndex(DocIndex):
         """
         with self.get_session() as session:
             return session.query(Document).filter_by(file_path=filepath).first()
+
+    def get_all_terms(self) -> list[str]:
+        """Get all unique terms in the index.
+
+        Returns:
+            List of all unique terms
+        """
+        with self.get_session() as session:
+            terms = session.query(DocumentFrequency.term).all()
+            return [term[0] for term in terms]

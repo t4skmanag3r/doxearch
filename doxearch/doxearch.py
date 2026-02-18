@@ -1,7 +1,9 @@
 import os
 import time
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Optional
 
 from doxearch.doc_index.doc_index import DocIndex
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
@@ -16,6 +18,7 @@ class Doxearch:
         folder_path: Path,
         index: DocIndex,
         tokenizer: Tokenizer,
+        fuzzy_threshold: float = 0.8,
     ):
         """Initialize Doxearch.
 
@@ -28,6 +31,7 @@ class Doxearch:
         self.index = index
         self.tokenizer = tokenizer
         self.pdf_doc_parser = PDFParser()
+        self.fuzzy_threshold = fuzzy_threshold
 
     def index_folder(self, batch_size: int = 100):
         """Index all PDF documents in a folder using batch database operations.
@@ -342,9 +346,83 @@ class Doxearch:
         self.index.add_documents_batch(documents_batch)
         return time.time() - index_start
 
-    def search(self, query: str, top_k: int = 10) -> list[dict[str, str | float]]:
-        """Search for documents using the abstract index interface."""
+    def _find_similar_terms_optimized(
+        self,
+        query_term: str,
+        all_terms: list[str],
+        threshold: float,
+        max_candidates: int = 1000,
+    ) -> list[str]:
+        """Find terms similar to the query term using optimized fuzzy matching.
 
+        Uses multiple optimization strategies:
+        1. Length-based pre-filtering
+        2. First character filtering
+        3. Limited candidate checking
+
+        Args:
+            query_term: The term to find matches for
+            all_terms: List of all terms in the index
+            threshold: Minimum similarity score (0.0-1.0)
+            max_candidates: Maximum number of candidates to check
+
+        Returns:
+            List of similar terms
+        """
+        query_lower = query_term.lower()
+        query_len = len(query_lower)
+
+        # Pre-filter candidates based on length difference
+        # If threshold is 0.8, terms can't differ by more than ~20% in length
+        max_len_diff = int(query_len * (1 - threshold)) + 1
+
+        candidates = []
+        for term in all_terms:
+            term_len = len(term)
+            # Quick length check
+            if abs(term_len - query_len) <= max_len_diff:
+                # Quick first character check (optional, but helps)
+                if query_lower[0] == term[0].lower():
+                    candidates.append(term)
+
+        # Limit candidates to avoid excessive computation
+        if len(candidates) > max_candidates:
+            # Prioritize exact prefix matches
+            candidates.sort(
+                key=lambda t: (
+                    not t.lower().startswith(query_lower[:3]),  # Prefer prefix matches
+                    abs(len(t) - query_len),  # Then by length similarity
+                )
+            )
+            candidates = candidates[:max_candidates]
+
+        # Now do actual similarity computation on filtered candidates
+        similar_terms = []
+        for term in candidates:
+            similarity = SequenceMatcher(None, query_lower, term.lower()).ratio()
+            if similarity >= threshold:
+                similar_terms.append(term)
+
+        return similar_terms
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        use_fuzzy: bool = True,
+        fuzzy_threshold: float = 0.8,
+    ) -> list[dict[str, str | float]]:
+        """Search for documents using the abstract index interface.
+
+        Args:
+            query: Search query string
+            top_k: Number of top results to return
+            use_fuzzy: Whether to use fuzzy matching for typos
+            fuzzy_threshold: Override default fuzzy matching threshold
+
+        Returns:
+            List of search results with document metadata and scores
+        """
         query_tokens = self.tokenizer.tokenize(query)
         if not query_tokens:
             return []
@@ -353,6 +431,12 @@ class Doxearch:
         total_docs = self.index.get_document_count()
         if total_docs == 0:
             return []
+
+        # Apply fuzzy matching if enabled
+        if use_fuzzy:
+            threshold = fuzzy_threshold or self.fuzzy_threshold
+            expanded_terms = self._expand_query_terms_fuzzy(query_terms, threshold)
+            query_terms = expanded_terms
 
         doc_scores = {}
 
@@ -420,6 +504,36 @@ class Doxearch:
                 )
 
         return results
+
+    def _expand_query_terms_fuzzy(
+        self, query_terms: list[str], threshold: float
+    ) -> list[str]:
+        """Expand query terms using optimized fuzzy matching.
+
+        Args:
+            query_terms: Original query terms
+            threshold: Minimum similarity threshold
+
+        Returns:
+            Expanded list of terms including fuzzy matches
+        """
+        # Get all unique terms from the index
+        all_terms = self.index.get_all_terms()
+
+        # Early exit if index is empty
+        if not all_terms:
+            return query_terms
+
+        expanded_terms = set(query_terms)  # Start with original terms
+
+        for query_term in query_terms:
+            # Find similar terms with optimizations
+            similar_terms = self._find_similar_terms_optimized(
+                query_term, all_terms, threshold
+            )
+            expanded_terms.update(similar_terms)
+
+        return list(expanded_terms)
 
     def _update_moved_or_renamed_documents(self, doc_ids: list[str]) -> None:
         """Find and update file paths/file names for documents that have been moved or renamed.

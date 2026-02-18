@@ -6,7 +6,13 @@ from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
 @pytest.fixture
 def spacy_tokenizer():
     """Fixture to create a SpacyTokenizer instance."""
-    return SpacyTokenizer()
+    return SpacyTokenizer(use_lemmatization=False)
+
+
+@pytest.fixture
+def spacy_tokenizer_with_lemmatization():
+    """Fixture to create a SpacyTokenizer instance with lemmatization enabled."""
+    return SpacyTokenizer(use_lemmatization=True)
 
 
 def test_spacy_tokenizer_basic(spacy_tokenizer):
@@ -120,3 +126,27 @@ def test_spacy_tokenizer_custom_model():
         assert tokenizer.nlp is not None
     except ValueError:
         pytest.skip("en_core_web_sm model not installed")
+
+
+def test_spacy_tokenizer_lemmatization_enabled(spacy_tokenizer_with_lemmatization):
+    """Test that lemmatization converts words to their base form."""
+    text = "running runs ran"
+    tokens = spacy_tokenizer_with_lemmatization.tokenize(text)
+
+    # All forms should be lemmatized to "run"
+    assert "run" in tokens
+    assert "running" not in tokens
+    assert "runs" not in tokens
+    assert "ran" not in tokens
+
+
+def test_spacy_tokenizer_lemmatization_disabled(spacy_tokenizer):
+    """Test that without lemmatization, words keep their original form."""
+    text = "running runs ran"
+    tokens = spacy_tokenizer.tokenize(text)
+
+    # Words should remain in their original form (lowercase)
+    assert "running" in tokens
+    assert "runs" in tokens
+    assert "ran" in tokens
+    assert "run" not in tokens

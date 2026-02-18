@@ -123,3 +123,12 @@ class DocIndex(ABC):
         """
         Add multiple documents in a single transaction (bulk operation).
         """
+
+    @abstractmethod
+    def get_all_terms(self) -> list[str]:
+        """Get all unique terms in the index.
+
+        Returns:
+            List of all unique terms
+        """
+        pass

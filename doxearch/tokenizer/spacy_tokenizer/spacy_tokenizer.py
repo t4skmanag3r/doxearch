@@ -4,15 +4,22 @@ from doxearch.tokenizer.tokenizer import Tokenizer
 
 
 class SpacyTokenizer(Tokenizer):
-    def __init__(self, model: str = "en_core_web_sm", disable: list[str] | None = None):
+    def __init__(
+        self,
+        model: str = "en_core_web_sm",
+        use_lemmatization: bool = True,
+        disable: list[str] | None = None,
+    ):
         """Initialize SpacyTokenizer with a spacy language model.
 
         Args:
             model: Name of the spacy model to use (default: "en_core_web_sm")
+             use_lemmatization: Whether to use lemmatization for word normalization
             disable: List of pipeline components to disable for faster processing.
                     Default disables parser and NER, keeping only tokenizer.
         """
         self.model_name = model
+        self.use_lemmatization = use_lemmatization
 
         # Disable expensive components we don't need for simple tokenization
         if disable is None:
@@ -27,18 +34,26 @@ class SpacyTokenizer(Tokenizer):
             ) from exc
 
     def tokenize(self, text: str) -> list[str]:
-        """Tokenize text using spacy.
+        """Tokenize text using spaCy with optional lemmatization.
 
         Args:
             text: Input text to tokenize
 
         Returns:
-            List of lowercase tokens, excluding punctuation and whitespace
+            List of tokens (lemmatized if enabled)
         """
-        doc = self.nlp(text)
-        tokens = [
-            token.text.lower()
-            for token in doc
-            if not token.is_punct and not token.is_space
-        ]
+        doc = self.nlp(text.lower())
+
+        if self.use_lemmatization:
+            # Use lemma form to normalize different word forms
+            tokens = [
+                token.lemma_
+                for token in doc
+                if not token.is_punct and not token.is_space
+            ]
+        else:
+            tokens = [
+                token.text for token in doc if not token.is_punct and not token.is_space
+            ]
+
         return tokens
