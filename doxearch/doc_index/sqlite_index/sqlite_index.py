@@ -757,3 +757,34 @@ class SQLiteIndex(DocIndex):
                 )
 
                 raise DatabaseOperationError("add_documents_batch", e) from e
+
+    def get_all_documents(self) -> list[Document]:
+        """Get all documents from the index ordered by filename.
+
+        Returns:
+            list[Document]: List of all documents ordered by filename
+
+        Example:
+            documents = index.get_all_documents_ordered()
+            for doc in documents:
+                print(f"{doc.filename}: {doc.term_count} terms")
+        """
+        with self.get_session() as session:
+            return session.query(Document).order_by(Document.filename).all()
+
+    def get_document_by_filepath(self, filepath: str) -> Document | None:
+        """Get a document by its file path.
+
+        Args:
+            filepath (str): The file path to search for
+
+        Returns:
+            Document | None: The document if found, None otherwise
+
+        Example:
+            doc = index.get_document_by_filepath("/path/to/file.pdf")
+            if doc:
+                print(f"Found document: {doc.filename}")
+        """
+        with self.get_session() as session:
+            return session.query(Document).filter_by(file_path=filepath).first()

@@ -12,7 +12,7 @@ from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
 from doxearch.utils.app_dir import get_app_data_dir
 from doxearch.utils.general import get_db_path_for_directory
 
-app = typer.Typer(
+main = typer.Typer(
     name="doxearch",
     help="Local search engine for indexing documents (PDFs, docxs, etc.) using TF-IDF.",
     add_completion=False,
@@ -47,7 +47,7 @@ def get_doxearch_instance(
     return Doxearch(folder, index, tokenizer)
 
 
-@app.command()
+@main.command()
 def index(
     folder: Path = typer.Argument(
         ...,
@@ -143,7 +143,7 @@ def index(
         raise typer.Exit(1)
 
 
-@app.command()
+@main.command()
 def search(
     query: str = typer.Argument(None, help="Search query"),
     folder: Path = typer.Argument(
@@ -237,7 +237,7 @@ def search(
         raise typer.Exit(1)
 
 
-@app.command()
+@main.command()
 def list_directories():
     """List all indexed directories."""
     try:
@@ -286,7 +286,7 @@ def list_directories():
         raise typer.Exit(1)
 
 
-@app.command()
+@main.command()
 def set_active(
     folder: Path = typer.Argument(
         ...,
@@ -317,7 +317,7 @@ def set_active(
         raise typer.Exit(1)
 
 
-@app.command()
+@main.command()
 def remove_directory(
     folder: Path = typer.Argument(
         ...,
@@ -420,4 +420,4 @@ def _interactive_search(doxearch: Doxearch):
 
 
 if __name__ == "__main__":
-    app()
+    main()

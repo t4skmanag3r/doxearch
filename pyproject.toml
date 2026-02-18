@@ -13,10 +13,22 @@ dependencies = [
     "typer[all]>=0.23.0",
     "lt-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/lt_core_news_sm-3.8.0/lt_core_news_sm-3.8.0-py3-none-any.whl",
     "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    "pyqt6>=6.10.2",
 ]
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-]
+dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0"]
+
+[project.scripts]
+# CLI entry point
+doxearch = "doxearch_cli.main:main"
+# GUI entry point
+doxearch-gui = "doxearch_gui.main:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["doxearch*"]

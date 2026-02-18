@@ -199,3 +199,27 @@ class DirectoryContextManager:
                 "tokenizer_model_version": directory.tokenizer_model_version,
                 "is_active": bool(directory.is_active),
             }
+
+    def get_all_directories(self) -> list[dict]:
+        """Get all indexed directories with their information.
+
+        Returns:
+            list[dict]: List of dictionaries containing directory information
+
+        Example:
+            directories = context_manager.get_all_directories()
+            for dir_info in directories:
+                print(f"{dir_info['directory_path']}: {dir_info['is_active']}")
+        """
+        with self.get_session() as session:
+            directories = session.query(IndexedDirectory).all()
+            return [
+                {
+                    "directory_path": directory.directory_path,
+                    "db_path": directory.db_path,
+                    "tokenizer_model_name": directory.tokenizer_model_name,
+                    "tokenizer_model_version": directory.tokenizer_model_version,
+                    "is_active": directory.is_active,
+                }
+                for directory in directories
+            ]
