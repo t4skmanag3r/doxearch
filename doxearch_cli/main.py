@@ -28,22 +28,20 @@ def get_context_manager() -> DirectoryContextManager:
 
 
 def get_doxearch_instance(
-    folder: Path, db_path: str, model: str = "en_core_web_sm"
+    folder: Path,
+    db_path: str,
+    model: str = "en_core_web_sm",
+    use_lemmatization: bool = True,
+    use_stemming: bool = False,
 ) -> Doxearch:
-    """Initialize and return a Doxearch instance."""
+    """Create a Doxearch instance with the specified configuration."""
     index = SQLiteIndex(db_path=db_path)
-
-    try:
-        tokenizer = SpacyTokenizer(model=model, disable=["parser", "ner"])
-    except ValueError as e:
-        console.print(f"[bold red]✗ Model Error:[/bold red] {e}")
-        console.print("\n[yellow]Available models:[/yellow]")
-        console.print("  • en_core_web_sm (English)")
-        console.print("  • lt_core_news_sm (Lithuanian)")
-        console.print("\n[cyan]Install with:[/cyan]")
-        console.print(f"  uv run python -m spacy download {model}")
-        raise typer.Exit(1)
-
+    tokenizer = SpacyTokenizer(
+        model=model,
+        use_lemmatization=use_lemmatization,
+        use_stemming=use_stemming,
+        disable=["parser", "ner"],
+    )
     return Doxearch(folder, index, tokenizer)
 
 
@@ -69,74 +67,78 @@ def index(
     force: bool = typer.Option(
         False, "--force", "-f", help="Force re-indexing of all documents"
     ),
+    lemmatization: bool = typer.Option(
+        True,
+        "--lemmatization/--no-lemmatization",
+        help="Enable or disable lemmatization",
+    ),
+    stemming: bool = typer.Option(
+        False,
+        "--stemming/--no-stemming",
+        help="Enable or disable stemming",
+    ),
 ):
     """Index documents in a folder."""
-    console.print(f"[bold blue]Indexing folder:[/bold blue] {folder}")
-
     try:
-        # Initialize context manager
+        # Validate tokenization options
+        if lemmatization and stemming:
+            console.print(
+                "[bold red]✗ Error:[/bold red] Lemmatization and stemming cannot be enabled at the same time."
+            )
+            console.print("[cyan]Tip:[/cyan] Choose one or neither.")
+            raise typer.Exit(1)
+
         context_manager = get_context_manager()
-        app_data_dir = get_app_data_dir()
-
-        # Ensure indexes directory exists
-        indexes_dir = app_data_dir / "indexes"
-        indexes_dir.mkdir(parents=True, exist_ok=True)
-
-        # Check if directory is already indexed
         folder_str = str(folder.resolve())
 
-        # Get or create database path for this directory
-        db_path = get_db_path_for_directory(folder_str, app_data_dir)
+        # Prepare database path
+        indexes_dir = context_manager.app_data_dir / "indexes"
+        indexes_dir.mkdir(parents=True, exist_ok=True)
+        db_path = get_db_path_for_directory(folder_str, context_manager.app_data_dir)
 
+        # Register directory with tokenization settings
         try:
-            # Try to add the directory to context manager
             context_manager.add_indexed_directory(
                 folder_str,
                 str(db_path),
                 model,
-                model_version=None,  # TODO: Extract version from tokenizer
+                model_version=None,
+                lemmatization_enabled=lemmatization,
+                stemming_enabled=stemming,
             )
-            console.print(f"[green]✓[/green] Registered directory in context manager")
-            console.print(f"[green]✓[/green] Database: {db_path}")
+            console.print(f"[bold green]✓[/bold green] Registered directory: {folder}")
+            console.print(f"  Model: {model}")
+            console.print(
+                f"  Lemmatization: {'Enabled' if lemmatization else 'Disabled'}"
+            )
+            console.print(f"  Stemming: {'Enabled' if stemming else 'Disabled'}")
         except DirectoryAlreadyIndexedError:
             if not force:
-                console.print(f"[yellow]⚠[/yellow] Directory already indexed")
-                console.print("[cyan]Tip:[/cyan] Use --force to re-index")
+                console.print(f"[yellow]⚠[/yellow] Directory already indexed: {folder}")
+                force_reindex = typer.confirm("Do you want to re-index?")
+                if not force_reindex:
+                    raise typer.Exit(0)
 
-                # Set as active directory and get its db_path
-                active_info = context_manager.set_active_directory(folder_str)
-                db_path = Path(active_info["db_path"])
-                console.print(f"[green]✓[/green] Set as active directory")
-                console.print(f"[green]✓[/green] Using database: {db_path}")
-            else:
-                console.print(f"[yellow]⚠[/yellow] Force re-indexing...")
-                # Set as active directory for re-indexing
-                active_info = context_manager.set_active_directory(folder_str)
-                db_path = Path(active_info["db_path"])
+            console.print(f"[cyan]Re-indexing directory:[/cyan] {folder}")
+            # Set as active to get the db_path
+            active_info = context_manager.set_active_directory(folder_str)
+            db_path = Path(active_info["db_path"])
 
-        doxearch = get_doxearch_instance(folder, str(db_path), model=model)
-        console.print(f"[green]✓[/green] Using model: {model}")
+        # Create Doxearch instance with tokenization settings
+        doxearch = get_doxearch_instance(
+            folder,
+            str(db_path),
+            model=model,
+            use_lemmatization=lemmatization,
+            use_stemming=stemming,
+        )
 
-        # Check for documents
-        pdf_files = list(folder.rglob("*.pdf"))
-        docx_files = list(folder.rglob("*.docx"))
-        total_files = len(pdf_files) + len(docx_files)
+        console.print(f"\n[bold cyan]Indexing folder:[/bold cyan] {folder}")
+        console.print(f"[cyan]Batch size:[/cyan] {batch_size}\n")
 
-        if total_files == 0:
-            console.print("[yellow]⚠[/yellow] No PDF or DOCX files found")
-            raise typer.Exit(1)
+        doxearch.index_folder(batch_size=batch_size)
 
-        console.print(f"[cyan]Found {total_files} document(s)[/cyan]")
-
-        # Index with progress
-        with console.status("[bold green]Indexing documents..."):
-            doxearch.index_folder()
-
-        console.print("[bold green]✓ Indexing completed![/bold green]")
-
-        # Show statistics
-        final_count = doxearch.index.get_document_count()
-        console.print(f"[cyan]Total documents indexed: {final_count}[/cyan]")
+        console.print("\n[bold green]✓ Indexing complete![/bold green]")
 
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
@@ -271,7 +273,9 @@ def list_directories():
             table.add_column("Directory", style="green")
             table.add_column("Model", style="blue")
             table.add_column("Version", style="magenta")
-            table.add_column("Database", style="yellow")
+            table.add_column("Lemma", style="yellow", width=6)
+            table.add_column("Stem", style="yellow", width=6)
+            table.add_column("Database", style="dim")
 
             for directory in directories:
                 status = "✓ Active" if directory.is_active else "Inactive"
@@ -281,11 +285,17 @@ def list_directories():
                 db_path = Path(directory.db_path)
                 db_display = db_path.name if db_path.exists() else directory.db_path
 
+                # Format boolean fields
+                lemma_display = "✓" if directory.lemmatization_enabled else "✗"
+                stem_display = "✓" if directory.stemming_enabled else "✗"
+
                 table.add_row(
                     f"[{status_style}]{status}[/{status_style}]",
                     directory.directory_path,
                     directory.tokenizer_model_name,
                     directory.tokenizer_model_version or "N/A",
+                    lemma_display,
+                    stem_display,
                     db_display,
                 )
 
@@ -321,57 +331,6 @@ def set_active(
     except DirectoryNotFoundError:
         console.print(f"[bold red]✗ Error:[/bold red] Directory not indexed: {folder}")
         console.print("[cyan]Tip:[/cyan] Index the folder first with 'doxearch index'")
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[bold red]✗ Error:[/bold red] {e}")
-        raise typer.Exit(1)
-
-
-@main.command()
-def remove_directory(
-    folder: Path = typer.Argument(
-        ...,
-        help="Folder to remove from index",
-        file_okay=False,
-        dir_okay=True,
-        resolve_path=True,
-    ),
-    delete_db: bool = typer.Option(
-        False,
-        "--delete-db",
-        "-d",
-        help="Also delete the database file",
-    ),
-):
-    """Remove a directory from the index."""
-    try:
-        context_manager = get_context_manager()
-        folder_str = str(folder.resolve())
-
-        # Get directory info before removing
-        dir_info = context_manager.get_directory_info(folder_str)
-        if not dir_info:
-            console.print(f"[yellow]⚠[/yellow] Directory not indexed: {folder}")
-            raise typer.Exit(1)
-
-        db_path = Path(dir_info["db_path"])
-
-        # Remove from context manager
-        context_manager.remove_indexed_directory(folder_str)
-        console.print(f"[green]✓[/green] Removed directory from index: {folder_str}")
-
-        # Optionally delete the database file
-        if delete_db and db_path.exists():
-            db_path.unlink()
-            console.print(f"[green]✓[/green] Deleted database file: {db_path}")
-        elif db_path.exists():
-            console.print(f"[cyan]Database file preserved:[/cyan] {db_path}")
-            console.print(
-                "[cyan]Tip:[/cyan] Use --delete-db flag to also delete the database"
-            )
-
-    except DirectoryNotFoundError:
-        console.print(f"[bold red]✗ Error:[/bold red] Directory not indexed: {folder}")
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[bold red]✗ Error:[/bold red] {e}")
@@ -423,28 +382,6 @@ def _interactive_search(doxearch: Doxearch, use_fuzzy: bool = True):
                 break
 
             _perform_search(doxearch, query, top_k=10, use_fuzzy=use_fuzzy)
-
-        except KeyboardInterrupt:
-            console.print("\n[cyan]Goodbye![/cyan]")
-            break
-        except Exception as e:
-            console.print(f"[bold red]✗ Error:[/bold red] {e}")
-
-
-def _interactive_search(doxearch: Doxearch):
-    """Run interactive search mode."""
-    console.print("[bold cyan]Interactive Search Mode[/bold cyan]")
-    console.print("Type your query and press Enter. Type 'exit' or 'quit' to leave.\n")
-
-    while True:
-        try:
-            query = typer.prompt("Search", default="")
-
-            if query.lower() in ["exit", "quit", ""]:
-                console.print("[cyan]Goodbye![/cyan]")
-                break
-
-            _perform_search(doxearch, query, top_k=10)
 
         except KeyboardInterrupt:
             console.print("\n[cyan]Goodbye![/cyan]")

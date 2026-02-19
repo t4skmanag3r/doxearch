@@ -608,6 +608,40 @@ class DoxearchGUI(QMainWindow):
         model_layout.addStretch()
         layout.addLayout(model_layout)
 
+        # Tokenization options
+        tokenization_label = QLabel("Tokenization Options:")
+        tokenization_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(tokenization_label)
+
+        # Lemmatization checkbox
+        self.lemmatization_checkbox = QCheckBox("Enable Lemmatization")
+        self.lemmatization_checkbox.setChecked(True)
+        self.lemmatization_checkbox.setToolTip(
+            "Convert words to their base form (e.g., 'running' → 'run')"
+        )
+        self.lemmatization_checkbox.stateChanged.connect(
+            self.on_tokenization_option_changed
+        )
+        layout.addWidget(self.lemmatization_checkbox)
+
+        # Stemming checkbox
+        self.stemming_checkbox = QCheckBox("Enable Stemming")
+        self.stemming_checkbox.setChecked(False)
+        self.stemming_checkbox.setToolTip(
+            "Apply stemming algorithm to reduce words to their root form"
+        )
+        self.stemming_checkbox.stateChanged.connect(self.on_tokenization_option_changed)
+        layout.addWidget(self.stemming_checkbox)
+
+        # Warning label for XOR constraint
+        self.tokenization_warning_label = QLabel()
+        self.tokenization_warning_label.setStyleSheet(
+            "color: #FF9800; font-style: italic;"
+        )
+        self.tokenization_warning_label.setWordWrap(True)
+        self.tokenization_warning_label.setVisible(False)
+        layout.addWidget(self.tokenization_warning_label)
+
         # Force re-index checkbox
         self.force_checkbox = QCheckBox("Force re-indexing")
         layout.addWidget(self.force_checkbox)
@@ -632,6 +666,35 @@ class DoxearchGUI(QMainWindow):
 
         return tab
 
+    def on_tokenization_option_changed(self):
+        """Handle changes to tokenization options (enforce XOR constraint)."""
+        lemmatization_enabled = self.lemmatization_checkbox.isChecked()
+        stemming_enabled = self.stemming_checkbox.isChecked()
+
+        # If both are checked, show warning and uncheck the other one
+        if lemmatization_enabled and stemming_enabled:
+            # Determine which one was just checked
+            sender = self.sender()
+            if sender == self.lemmatization_checkbox:
+                # Lemmatization was just checked, uncheck stemming
+                self.stemming_checkbox.blockSignals(True)
+                self.stemming_checkbox.setChecked(False)
+                self.stemming_checkbox.blockSignals(False)
+                self.tokenization_warning_label.setText(
+                    "⚠ Lemmatization and stemming are mutually exclusive. Stemming has been disabled."
+                )
+            else:
+                # Stemming was just checked, uncheck lemmatization
+                self.lemmatization_checkbox.blockSignals(True)
+                self.lemmatization_checkbox.setChecked(False)
+                self.lemmatization_checkbox.blockSignals(False)
+                self.tokenization_warning_label.setText(
+                    "⚠ Lemmatization and stemming are mutually exclusive. Lemmatization has been disabled."
+                )
+            self.tokenization_warning_label.setVisible(True)
+        else:
+            self.tokenization_warning_label.setVisible(False)
+
     def create_directories_tab(self) -> QWidget:
         """Create the directories management tab."""
         tab = QWidget()
@@ -644,12 +707,38 @@ class DoxearchGUI(QMainWindow):
 
         # Directories table
         self.directories_table = QTableWidget()
-        self.directories_table.setColumnCount(5)
+        self.directories_table.setColumnCount(7)
         self.directories_table.setHorizontalHeaderLabels(
-            ["Status", "Directory", "Model", "Version", "Database"]
+            [
+                "Status",
+                "Directory",
+                "Model",
+                "Version",
+                "Lemmatization",
+                "Stemming",
+                "Database",
+            ]
         )
         self.directories_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            6, QHeaderView.ResizeMode.ResizeToContents
         )
         layout.addWidget(self.directories_table)
 
@@ -692,9 +781,16 @@ class DoxearchGUI(QMainWindow):
             folder = Path(directory_path)
             db_path = active_dir["db_path"]
             model = active_dir["tokenizer_model_name"]
+            lemmatization_enabled = active_dir.get("lemmatization_enabled", True)
+            stemming_enabled = active_dir.get("stemming_enabled", False)
 
             index = SQLiteIndex(db_path=db_path)
-            tokenizer = SpacyTokenizer(model=model, disable=["parser", "ner"])
+            tokenizer = SpacyTokenizer(
+                model=model,
+                use_lemmatization=lemmatization_enabled,
+                use_stemming=stemming_enabled,
+                disable=["parser", "ner"],
+            )
             self.current_doxearch = Doxearch(folder, index, tokenizer)
 
             # Load documents for the active directory
@@ -739,6 +835,17 @@ class DoxearchGUI(QMainWindow):
 
         model = self.model_combo.currentText()
         force = self.force_checkbox.isChecked()
+        lemmatization_enabled = self.lemmatization_checkbox.isChecked()
+        stemming_enabled = self.stemming_checkbox.isChecked()
+
+        # Validate tokenization options
+        if lemmatization_enabled and stemming_enabled:
+            QMessageBox.warning(
+                self,
+                "Invalid Configuration",
+                "Lemmatization and stemming cannot be enabled at the same time. Please choose one or neither.",
+            )
+            return
 
         # Prepare database path
         folder_str = str(folder.resolve())
@@ -749,9 +856,20 @@ class DoxearchGUI(QMainWindow):
         # Register directory
         try:
             self.context_manager.add_indexed_directory(
-                folder_str, str(db_path), model, model_version=None
+                folder_str,
+                str(db_path),
+                model,
+                model_version=None,
+                lemmatization_enabled=lemmatization_enabled,
+                stemming_enabled=stemming_enabled,
             )
             self.index_status_text.append(f"✓ Registered directory: {folder_str}")
+            self.index_status_text.append(
+                f"  - Lemmatization: {'Enabled' if lemmatization_enabled else 'Disabled'}"
+            )
+            self.index_status_text.append(
+                f"  - Stemming: {'Enabled' if stemming_enabled else 'Disabled'}"
+            )
         except DirectoryAlreadyIndexedError:
             if not force:
                 reply = QMessageBox.question(
@@ -772,7 +890,12 @@ class DoxearchGUI(QMainWindow):
 
         # Create Doxearch instance
         index = SQLiteIndex(db_path=str(db_path))
-        tokenizer = SpacyTokenizer(model=model, disable=["parser", "ner"])
+        tokenizer = SpacyTokenizer(
+            model=model,
+            use_lemmatization=lemmatization_enabled,
+            use_stemming=stemming_enabled,
+            disable=["parser", "ner"],
+        )
         doxearch = Doxearch(folder, index, tokenizer)
 
         # Disable UI during indexing
@@ -833,6 +956,23 @@ class DoxearchGUI(QMainWindow):
         """Load and display all indexed directories."""
         directories = self.context_manager.get_all_directories()
 
+        # Update table to include tokenization options columns
+        self.directories_table.setColumnCount(7)
+        self.directories_table.setHorizontalHeaderLabels(
+            [
+                "Status",
+                "Directory",
+                "Model",
+                "Version",
+                "Lemmatization",
+                "Stemming",
+                "Database",
+            ]
+        )
+        self.directories_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+
         self.directories_table.setRowCount(len(directories))
 
         for row, directory in enumerate(directories):
@@ -859,9 +999,23 @@ class DoxearchGUI(QMainWindow):
             version = directory["tokenizer_model_version"] or "N/A"
             self.directories_table.setItem(row, 3, QTableWidgetItem(version))
 
+            # Lemmatization status
+            lemmatization_enabled = directory.get("lemmatization_enabled", True)
+            lemmatization_text = "✓ Enabled" if lemmatization_enabled else "Disabled"
+            lemmatization_item = QTableWidgetItem(lemmatization_text)
+            lemmatization_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.directories_table.setItem(row, 4, lemmatization_item)
+
+            # Stemming status
+            stemming_enabled = directory.get("stemming_enabled", False)
+            stemming_text = "✓ Enabled" if stemming_enabled else "Disabled"
+            stemming_item = QTableWidgetItem(stemming_text)
+            stemming_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.directories_table.setItem(row, 5, stemming_item)
+
             # Database path
             db_name = Path(directory["db_path"]).name
-            self.directories_table.setItem(row, 4, QTableWidgetItem(db_name))
+            self.directories_table.setItem(row, 6, QTableWidgetItem(db_name))
 
     def set_active_directory(self):
         """Set the selected directory as active."""

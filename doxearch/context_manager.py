@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy import Boolean, Column, Integer, String, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from doxearch.exceptions import (
@@ -22,7 +22,9 @@ class IndexedDirectory(Base):
     db_path = Column(String, nullable=False)
     tokenizer_model_name = Column(String, nullable=False)
     tokenizer_model_version = Column(String, nullable=True)
-    is_active = Column(Integer, default=0)  # 0 = inactive, 1 = active
+    is_active = Column(Boolean, default=0)  # 0 = inactive, 1 = active
+    lemmatization_enabled = Column(Boolean, default=1)
+    stemming_enabled = Column(Boolean, default=0)
 
 
 class DirectoryContextManager:
@@ -45,24 +47,31 @@ class DirectoryContextManager:
         self,
         directory_path: str,
         db_path: str,
-        model_name: str,
+        tokenizer_model_name: str,
         model_version: str | None = None,
-    ) -> None:
+        lemmatization_enabled: bool = True,
+        stemming_enabled: bool = False,
+    ) -> dict:
         """
-        Add a new indexed directory to the context manager.
+        Add a new indexed directory to the context.
 
         Args:
-            directory_path: Absolute path to the directory
-            db_path: Path to the database file for this directory
-            model_name: Name of the tokenizer model used
+            directory_path: Path to the directory
+            db_path: Path to the SQLite database file
+            tokenizer_model_name: Name of the tokenizer model used
             model_version: Version of the tokenizer model (optional)
+            lemmatization_enabled: Whether lemmatization is enabled
+            stemming_enabled: Whether stemming is enabled
+
+        Returns:
+            Dictionary with the added directory information
 
         Raises:
-            InvalidDirectoryPathError: If directory_path is invalid
             DirectoryAlreadyIndexedError: If directory is already indexed
+            InvalidDirectoryPathError: If directory path is invalid
         """
-        if not directory_path or not isinstance(directory_path, str):
-            raise InvalidDirectoryPathError("Directory path must be a non-empty string")
+        if not directory_path:
+            raise InvalidDirectoryPathError(directory_path)
 
         with self.get_session() as session:
             # Check if directory already exists
@@ -75,20 +84,36 @@ class DirectoryContextManager:
             if existing:
                 raise DirectoryAlreadyIndexedError(directory_path)
 
-            # Deactivate all existing directories
-            session.query(IndexedDirectory).update({"is_active": 0})
+            # Deactivate all other directories
+            session.query(IndexedDirectory).update({"is_active": False})
 
-            # Add new directory as active
+            # Create new directory entry
             new_directory = IndexedDirectory(
                 directory_path=directory_path,
                 db_path=db_path,
-                tokenizer_model_name=model_name,
+                tokenizer_model_name=tokenizer_model_name,
                 tokenizer_model_version=model_version,
-                is_active=1,
+                is_active=True,
+                lemmatization_enabled=lemmatization_enabled,
+                stemming_enabled=stemming_enabled,
             )
 
             session.add(new_directory)
             session.commit()
+
+            # Refresh to get the latest state and extract data before session closes
+            session.refresh(new_directory)
+            result = {
+                "directory_path": new_directory.directory_path,
+                "db_path": new_directory.db_path,
+                "tokenizer_model_name": new_directory.tokenizer_model_name,
+                "tokenizer_model_version": new_directory.tokenizer_model_version,
+                "is_active": bool(new_directory.is_active),
+                "lemmatization_enabled": bool(new_directory.lemmatization_enabled),
+                "stemming_enabled": bool(new_directory.stemming_enabled),
+            }
+
+        return result
 
     def remove_indexed_directory(self, directory_path: str) -> None:
         """
@@ -115,31 +140,36 @@ class DirectoryContextManager:
 
     def get_active_directory(self) -> dict | None:
         """
-        Get the currently active directory (the one marked as active).
+        Get the currently active directory.
 
         Returns:
-            Dictionary with directory information or None if no active directory exists.
-            Dictionary contains: directory_path, db_path, tokenizer_model_name, tokenizer_model_version
+            Dictionary with active directory information or None if no active directory
         """
         with self.get_session() as session:
-            active_dir = session.query(IndexedDirectory).filter_by(is_active=1).first()
+            directory = (
+                session.query(IndexedDirectory).filter_by(is_active=True).first()
+            )
 
-            if not active_dir:
+            if not directory:
                 return None
 
+            # Extract data before session closes
             return {
-                "directory_path": active_dir.directory_path,
-                "db_path": active_dir.db_path,
-                "tokenizer_model_name": active_dir.tokenizer_model_name,
-                "tokenizer_model_version": active_dir.tokenizer_model_version,
+                "directory_path": directory.directory_path,
+                "db_path": directory.db_path,
+                "tokenizer_model_name": directory.tokenizer_model_name,
+                "tokenizer_model_version": directory.tokenizer_model_version,
+                "is_active": bool(directory.is_active),
+                "lemmatization_enabled": bool(directory.lemmatization_enabled),
+                "stemming_enabled": bool(directory.stemming_enabled),
             }
 
     def set_active_directory(self, directory_path: str) -> dict:
         """
-        Get a directory by path and mark it as active (deactivating all others).
+        Set a directory as the active directory.
 
         Args:
-            directory_path: Path to the directory to activate
+            directory_path: Path to the directory to set as active
 
         Returns:
             Dictionary with the activated directory information
@@ -148,29 +178,35 @@ class DirectoryContextManager:
             DirectoryNotFoundError: If directory is not in the index
         """
         with self.get_session() as session:
-            # Find the directory to activate
-            target_dir = (
+            directory = (
                 session.query(IndexedDirectory)
                 .filter_by(directory_path=directory_path)
                 .first()
             )
 
-            if not target_dir:
+            if not directory:
                 raise DirectoryNotFoundError(directory_path)
 
             # Deactivate all directories
-            session.query(IndexedDirectory).update({"is_active": 0})
+            session.query(IndexedDirectory).update({"is_active": False})
 
-            # Activate the target directory
-            target_dir.is_active = 1
+            # Activate the specified directory
+            directory.is_active = True
             session.commit()
 
-            return {
-                "directory_path": target_dir.directory_path,
-                "db_path": target_dir.db_path,
-                "tokenizer_model_name": target_dir.tokenizer_model_name,
-                "tokenizer_model_version": target_dir.tokenizer_model_version,
+            # Refresh and extract data before session closes
+            session.refresh(directory)
+            result = {
+                "directory_path": directory.directory_path,
+                "db_path": directory.db_path,
+                "tokenizer_model_name": directory.tokenizer_model_name,
+                "tokenizer_model_version": directory.tokenizer_model_version,
+                "is_active": bool(directory.is_active),
+                "lemmatization_enabled": bool(directory.lemmatization_enabled),
+                "stemming_enabled": bool(directory.stemming_enabled),
             }
+
+        return result
 
     def get_directory_info(self, directory_path: str) -> dict | None:
         """
@@ -198,28 +234,30 @@ class DirectoryContextManager:
                 "tokenizer_model_name": directory.tokenizer_model_name,
                 "tokenizer_model_version": directory.tokenizer_model_version,
                 "is_active": bool(directory.is_active),
+                "lemmatization_enabled": bool(directory.lemmatization_enabled),
+                "stemming_enabled": bool(directory.stemming_enabled),
             }
 
     def get_all_directories(self) -> list[dict]:
-        """Get all indexed directories with their information.
+        """
+        Get all indexed directories.
 
         Returns:
-            list[dict]: List of dictionaries containing directory information
-
-        Example:
-            directories = context_manager.get_all_directories()
-            for dir_info in directories:
-                print(f"{dir_info['directory_path']}: {dir_info['is_active']}")
+            List of dictionaries with directory information
         """
         with self.get_session() as session:
             directories = session.query(IndexedDirectory).all()
+
+            # Extract data before session closes
             return [
                 {
                     "directory_path": directory.directory_path,
                     "db_path": directory.db_path,
                     "tokenizer_model_name": directory.tokenizer_model_name,
                     "tokenizer_model_version": directory.tokenizer_model_version,
-                    "is_active": directory.is_active,
+                    "is_active": bool(directory.is_active),
+                    "lemmatization_enabled": bool(directory.lemmatization_enabled),
+                    "stemming_enabled": bool(directory.stemming_enabled),
                 }
                 for directory in directories
             ]
