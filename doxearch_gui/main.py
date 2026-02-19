@@ -813,6 +813,7 @@ class DoxearchGUI(QMainWindow):
         if folder:
             self.folder_input.setText(folder)
 
+    
     def start_indexing(self):
         """Start the indexing process."""
         folder_path = self.folder_input.text().strip()
@@ -853,7 +854,9 @@ class DoxearchGUI(QMainWindow):
         indexes_dir.mkdir(parents=True, exist_ok=True)
         db_path = get_db_path_for_directory(folder_str, self.app_data_dir)
 
-        # Register directory
+        # Check if directory is already indexed
+        is_already_indexed = False
+        existing_dir_info = None
         try:
             self.context_manager.add_indexed_directory(
                 folder_str,
@@ -865,28 +868,87 @@ class DoxearchGUI(QMainWindow):
             )
             self.index_status_text.append(f"✓ Registered directory: {folder_str}")
             self.index_status_text.append(
+                f"  - Model: {model}"
+            )
+            self.index_status_text.append(
                 f"  - Lemmatization: {'Enabled' if lemmatization_enabled else 'Disabled'}"
             )
             self.index_status_text.append(
                 f"  - Stemming: {'Enabled' if stemming_enabled else 'Disabled'}"
             )
         except DirectoryAlreadyIndexedError:
-            if not force:
-                reply = QMessageBox.question(
-                    self,
-                    "Directory Already Indexed",
-                    "This directory is already indexed. Do you want to re-index it?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
+            is_already_indexed = True
+            existing_dir_info = self.context_manager.get_directory_info(folder_str)
+            
+            if force:
+                # Force re-indexing: wipe and rebuild with new settings
+                try:
+                    self.index_status_text.append(
+                        f"🔄 Force re-indexing enabled - wiping existing index..."
+                    )
 
-                if reply == QMessageBox.StandardButton.No:
+                    # Remove the directory from context manager
+                    self.context_manager.remove_indexed_directory(folder_str)
+
+                    # Delete the database file if it exists
+                    if db_path.exists():
+                        db_path.unlink()
+                        self.index_status_text.append(
+                            f"✓ Deleted existing database: {db_path.name}"
+                        )
+
+                    # Re-register the directory with new settings
+                    self.context_manager.add_indexed_directory(
+                        folder_str,
+                        str(db_path),
+                        model,
+                        model_version=None,
+                        lemmatization_enabled=lemmatization_enabled,
+                        stemming_enabled=stemming_enabled,
+                    )
+                    self.index_status_text.append(
+                        f"✓ Re-registered directory with new settings"
+                    )
+                    self.index_status_text.append(
+                        f"  - Model: {model}"
+                    )
+                    self.index_status_text.append(
+                        f"  - Lemmatization: {'Enabled' if lemmatization_enabled else 'Disabled'}"
+                    )
+                    self.index_status_text.append(
+                        f"  - Stemming: {'Enabled' if stemming_enabled else 'Disabled'}"
+                    )
+                except Exception as e:
+                    self.index_status_text.append(f"✗ Error wiping index: {e}")
+                    QMessageBox.critical(
+                        self,
+                        "Error",
+                        f"Failed to wipe existing index:\n{e}",
+                    )
                     return
-
-            self.index_status_text.append(
-                f"⚠ Directory already indexed, re-indexing..."
-            )
-            active_info = self.context_manager.set_active_directory(folder_str)
-            db_path = Path(active_info["db_path"])
+            else:
+                # Normal re-indexing: update with existing settings (don't modify context record)
+                self.index_status_text.append(
+                    f"⚠ Directory already indexed - updating index with existing settings..."
+                )
+                self.index_status_text.append(
+                    f"  - Model: {existing_dir_info['tokenizer_model_name']}"
+                )
+                self.index_status_text.append(
+                    f"  - Lemmatization: {'Enabled' if existing_dir_info.get('lemmatization_enabled', True) else 'Disabled'}"
+                )
+                self.index_status_text.append(
+                    f"  - Stemming: {'Enabled' if existing_dir_info.get('stemming_enabled', False) else 'Disabled'}"
+                )
+                self.index_status_text.append(
+                    f"💡 Tip: Check 'Force re-indexing' to rebuild with new settings"
+                )
+                
+                # Use existing settings for indexing (don't change context record)
+                model = existing_dir_info['tokenizer_model_name']
+                lemmatization_enabled = existing_dir_info.get('lemmatization_enabled', True)
+                stemming_enabled = existing_dir_info.get('stemming_enabled', False)
+                db_path = Path(existing_dir_info['db_path'])
 
         # Create Doxearch instance
         index = SQLiteIndex(db_path=str(db_path))
