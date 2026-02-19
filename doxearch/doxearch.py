@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from doxearch.doc_index.doc_index import DocIndex
+from doxearch.doc_parser.parsers.docx_parser import DocxParser
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
@@ -31,18 +32,23 @@ class Doxearch:
         self.index = index
         self.tokenizer = tokenizer
         self.pdf_doc_parser = PDFParser()
+        self.docx_doc_parser = DocxParser()
         self.fuzzy_threshold = fuzzy_threshold
 
     def index_folder(self, batch_size: int = 100):
-        """Index all PDF documents in a folder using batch database operations.
+        """Index all PDF and DOCX documents in a folder using batch database operations.
 
         Args:
             batch_size: Number of documents to insert in a single batch (default: 100)
         """
         start_time = time.time()
-        files = list(self.folder_path.rglob("*.pdf"))
+        pdf_files = list(self.folder_path.rglob("*.pdf"))
+        docx_files = list(self.folder_path.rglob("*.docx"))
+        files = pdf_files + docx_files
 
-        print(f"Found {len(files)} PDF files to process\n")
+        print(
+            f"Found {len(pdf_files)} PDF files and {len(docx_files)} DOCX files to process\n"
+        )
 
         # Compute file hashes
         file_hashes, hash_time = self._compute_file_hashes(files)
@@ -238,9 +244,18 @@ class Doxearch:
         Returns:
             Tuple of (term_counts or None if skipped, parse_time, tokenize_time)
         """
-        # Parse PDF
+        # Parse document based on file extension
         parse_start = time.time()
-        text = self.pdf_doc_parser.parse(file_path)
+        file_extension = file_path.suffix.lower()
+
+        if file_extension == ".pdf":
+            text = self.pdf_doc_parser.parse(file_path)
+        elif file_extension == ".docx":
+            text = self.docx_doc_parser.parse(file_path)
+        else:
+            print(f"Unsupported file type: {file_path.name}")
+            return None, 0, 0
+
         parse_time = time.time() - parse_start
 
         if not text.strip():
@@ -550,11 +565,13 @@ class Doxearch:
         # Get current metadata for documents that need updating
         documents_metadata = self.index.get_documents_metadata(doc_ids)
 
-        # Get all current PDF files in the folder
-        current_files = list(self.folder_path.rglob("*.pdf"))
+        # Get all current PDF and DOCX files in the folder
+        print(f"\nSearching for {len(doc_ids)} moved documents...")
+        current_pdf_files = list(self.folder_path.rglob("*.pdf"))
+        current_docx_files = list(self.folder_path.rglob("*.docx"))
+        current_files = current_pdf_files + current_docx_files
 
         # Compute hashes for all current files
-        print(f"\nSearching for {len(doc_ids)} moved documents...")
         current_file_hashes = {
             compute_file_hash(file_path): file_path for file_path in current_files
         }
