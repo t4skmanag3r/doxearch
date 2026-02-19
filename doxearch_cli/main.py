@@ -68,9 +68,9 @@ def index(
         False, "--force", "-f", help="Force re-indexing of all documents"
     ),
     lemmatization: bool = typer.Option(
-        True,
+        None,
         "--lemmatization/--no-lemmatization",
-        help="Enable or disable lemmatization",
+        help="Enable or disable lemmatization (default: enabled if stemming is not used)",
     ),
     stemming: bool = typer.Option(
         False,
@@ -80,6 +80,11 @@ def index(
 ):
     """Index documents in a folder."""
     try:
+        # Handle default lemmatization behavior
+        if lemmatization is None:
+            # Default to True unless stemming is explicitly enabled
+            lemmatization = not stemming
+
         # Validate tokenization options
         if lemmatization and stemming:
             console.print(
@@ -89,12 +94,13 @@ def index(
             raise typer.Exit(1)
 
         context_manager = get_context_manager()
+        app_data_dir = get_app_data_dir()
         folder_str = str(folder.resolve())
 
         # Prepare database path
-        indexes_dir = context_manager.app_data_dir / "indexes"
+        indexes_dir = app_data_dir / "indexes"
         indexes_dir.mkdir(parents=True, exist_ok=True)
-        db_path = get_db_path_for_directory(folder_str, context_manager.app_data_dir)
+        db_path = get_db_path_for_directory(folder_str, app_data_dir)
 
         # Register directory with tokenization settings
         try:
@@ -113,16 +119,61 @@ def index(
             )
             console.print(f"  Stemming: {'Enabled' if stemming else 'Disabled'}")
         except DirectoryAlreadyIndexedError:
-            if not force:
-                console.print(f"[yellow]⚠[/yellow] Directory already indexed: {folder}")
-                force_reindex = typer.confirm("Do you want to re-index?")
-                if not force_reindex:
-                    raise typer.Exit(0)
+            existing_dir_info = context_manager.get_directory_info(folder_str)
 
-            console.print(f"[cyan]Re-indexing directory:[/cyan] {folder}")
-            # Set as active to get the db_path
-            active_info = context_manager.set_active_directory(folder_str)
-            db_path = Path(active_info["db_path"])
+            if force:
+                # Force re-indexing: wipe and rebuild with new settings
+                console.print(
+                    f"[cyan]🔄 Force re-indexing enabled - wiping existing index...[/cyan]"
+                )
+
+                # Remove the directory from context manager
+                context_manager.remove_indexed_directory(folder_str)
+
+                # Delete the database file if it exists
+                if db_path.exists():
+                    db_path.unlink()
+                    console.print(
+                        f"[green]✓[/green] Deleted existing database: {db_path.name}"
+                    )
+
+                # Re-register the directory with new settings
+                context_manager.add_indexed_directory(
+                    folder_str,
+                    str(db_path),
+                    model,
+                    model_version=None,
+                    lemmatization_enabled=lemmatization,
+                    stemming_enabled=stemming,
+                )
+                console.print(
+                    f"[green]✓[/green] Re-registered directory with new settings"
+                )
+                console.print(f"  Model: {model}")
+                console.print(
+                    f"  Lemmatization: {'Enabled' if lemmatization else 'Disabled'}"
+                )
+                console.print(f"  Stemming: {'Enabled' if stemming else 'Disabled'}")
+            else:
+                # Normal re-indexing: update with existing settings (don't modify context record)
+                console.print(f"[yellow]⚠[/yellow] Directory already indexed: {folder}")
+                console.print(f"[cyan]Updating index with existing settings...[/cyan]")
+                console.print(f"  Model: {existing_dir_info['tokenizer_model_name']}")
+                console.print(
+                    f"  Lemmatization: {'Enabled' if existing_dir_info.get('lemmatization_enabled', True) else 'Disabled'}"
+                )
+                console.print(
+                    f"  Stemming: {'Enabled' if existing_dir_info.get('stemming_enabled', False) else 'Disabled'}"
+                )
+                console.print(
+                    f"[cyan]💡 Tip:[/cyan] Use --force to rebuild with new settings"
+                )
+
+                # Use existing settings for indexing (don't change context record)
+                model = existing_dir_info["tokenizer_model_name"]
+                lemmatization = existing_dir_info.get("lemmatization_enabled", True)
+                stemming = existing_dir_info.get("stemming_enabled", False)
+                db_path = Path(existing_dir_info["db_path"])
 
         # Create Doxearch instance with tokenization settings
         doxearch = get_doxearch_instance(
