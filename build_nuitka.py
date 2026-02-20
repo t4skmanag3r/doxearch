@@ -35,18 +35,16 @@ def check_dependencies():
     try:
         import zstandard
 
-        print("✓ zstandard installed (compression enabled)")
+        print("[OK] zstandard installed (compression enabled)")
     except ImportError:
-        print(
-            "⚠ Warning: zstandard not installed. Install with: uv add --dev zstandard"
-        )
+        print("[WARNING] zstandard not installed. Install with: uv add --dev zstandard")
         print("  Executable will be larger without compression.")
 
     # Check for ccache
     if shutil.which("ccache"):
-        print("✓ ccache found (faster rebuilds enabled)")
+        print("[OK] ccache found (faster rebuilds enabled)")
     else:
-        print("⚠ Warning: ccache not found. Install for faster rebuilds:")
+        print("[WARNING] ccache not found. Install for faster rebuilds:")
         print("  Ubuntu/Debian: sudo apt-get install ccache")
         print("  macOS: brew install ccache")
 
@@ -59,7 +57,6 @@ def get_platform_flags(system: str) -> list[str]:
         flags.extend(
             [
                 "--windows-disable-console",
-                "--windows-icon-from-ico=assets/icon.ico",  # Optional: add icon
                 "--windows-company-name=Doxearch",
                 "--windows-product-name=Doxearch",
                 "--windows-file-version=0.1.0",
@@ -151,7 +148,7 @@ def build_executable():
 
         print()
         print("=" * 60)
-        print("✓ Build completed successfully!")
+        print("[SUCCESS] Build completed successfully!")
         print("=" * 60)
         print(f"Executable: {exe_path}")
 
@@ -162,7 +159,7 @@ def build_executable():
     except subprocess.CalledProcessError as e:
         print()
         print("=" * 60)
-        print(f"✗ Build failed with error: {e}")
+        print(f"[ERROR] Build failed with error: {e}")
         print("=" * 60)
         sys.exit(1)
 
