@@ -8,6 +8,7 @@ from typing import Optional
 from doxearch.doc_index.doc_index import DocIndex
 from doxearch.doc_parser.parsers.docx_parser import DocxParser
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
+from doxearch.exceptions import DirectoryDoesntExistError
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
 from doxearch.utils.file_hash import compute_file_hash
@@ -40,7 +41,15 @@ class Doxearch:
 
         Args:
             batch_size: Number of documents to insert in a single batch (default: 100)
+
+        Raises:
+            DirectoryNotFoundError: If the indexed folder no longer exists
         """
+
+        # Check if the folder still exists before attempting index
+        if not self.folder_path.exists():
+            raise DirectoryDoesntExistError(str(self.folder_path))
+
         start_time = time.time()
         pdf_files = list(self.folder_path.rglob("*.pdf"))
         docx_files = list(self.folder_path.rglob("*.docx"))
@@ -437,7 +446,14 @@ class Doxearch:
 
         Returns:
             List of search results with document metadata and scores
+
+        Raises:
+            DirectoryNotFoundError: If the indexed folder no longer exists
         """
+        # Check if the folder still exists before attempting search
+        if not self.folder_path.exists():
+            raise DirectoryDoesntExistError(str(self.folder_path))
+
         query_tokens = self.tokenizer.tokenize(query)
         if not query_tokens:
             return []

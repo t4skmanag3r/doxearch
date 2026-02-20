@@ -24,3 +24,11 @@ class DirectoryNotFoundError(ContextManagerError):
     def __init__(self, directory_path):
         self.directory_path = directory_path
         super().__init__(f"Directory not found in index: {directory_path}")
+
+
+class DirectoryDoesntExistError(ContextManagerError):
+    """Raised when a directory does not exist on the system"""
+
+    def __init__(self, directory_path):
+        self.directory_path = directory_path
+        super().__init__(f"Directory does not exist: {directory_path}")
