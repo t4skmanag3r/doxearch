@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import spacy
 from snowballstemmer import stemmer
 
@@ -50,6 +52,7 @@ class SpacyTokenizer(Tokenizer):
         use_lemmatization: bool = True,
         use_stemming: bool = False,
         disable: list[str] | None = None,
+        model_path: str | Path | None = None,
     ):
         """Initialize SpacyTokenizer with a spacy language model.
 
@@ -59,6 +62,7 @@ class SpacyTokenizer(Tokenizer):
             use_stemming: Whether to use stemming (only for Lithuanian)
             disable: List of pipeline components to disable for faster processing.
                     Default disables parser and NER, keeping only tokenizer.
+            model_path: Optional path to model directory (for custom model locations)
         """
         self.model_name = model
         self.use_lemmatization = use_lemmatization
@@ -90,7 +94,11 @@ class SpacyTokenizer(Tokenizer):
             disable = ["parser", "ner"]
 
         try:
-            self.nlp = spacy.load(model, disable=disable)
+            # Try loading from custom path first, then fall back to spacy.load
+            if model_path:
+                self.nlp = spacy.load(model_path, disable=disable)
+            else:
+                self.nlp = spacy.load(model, disable=disable)
         except OSError as exc:
             raise ValueError(
                 f"Spacy model '{model}' not found. "

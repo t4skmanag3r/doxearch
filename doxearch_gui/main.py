@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,6 +35,7 @@ from doxearch.context_manager import DirectoryContextManager
 from doxearch.doc_index.sqlite_index.sqlite_index import Document, SQLiteIndex
 from doxearch.doxearch import Doxearch
 from doxearch.exceptions import DirectoryAlreadyIndexedError, DirectoryNotFoundError
+from doxearch.model_manager import ModelManager
 from doxearch.tokenizer.spacy_tokenizer.spacy_tokenizer import SpacyTokenizer
 from doxearch.utils.app_dir import get_app_data_dir
 from doxearch.utils.general import get_db_path_for_directory
@@ -93,6 +94,38 @@ class SearchWorker(QThread):
             self.error.emit(str(e))
 
 
+class ModelDownloadWorker(QThread):
+    """Worker thread for downloading models."""
+
+    progress = pyqtSignal(int, int, str)  # downloaded, total, message
+    finished = pyqtSignal(str, str)  # model_name, message
+    error = pyqtSignal(str)
+
+    def __init__(self, model_manager, model_name: str):
+        super().__init__()
+        self.model_manager = model_manager
+        self.model_name = model_name
+
+    def run(self):
+        """Download the model."""
+        try:
+
+            def progress_callback(downloaded: int, total: int, message: str):
+                self.progress.emit(downloaded, total, message)
+
+            success, message = self.model_manager.download_model(
+                self.model_name, progress_callback=progress_callback
+            )
+
+            if success:
+                self.finished.emit(self.model_name, message)
+            else:
+                self.error.emit(message)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class DoxearchGUI(QMainWindow):
     """Main GUI window for Doxearch."""
 
@@ -109,6 +142,11 @@ class DoxearchGUI(QMainWindow):
         self.current_doxearch: Optional[Doxearch] = None
         self.index_worker: Optional[IndexWorker] = None
         self.search_worker: Optional[SearchWorker] = None
+        self.model_download_worker: Optional[ModelDownloadWorker] = None
+
+        # Initialize model manager
+        self.models_dir = self.app_data_dir / "models"
+        self.model_manager = ModelManager(models_dir=self.models_dir)
 
         self.setWindowTitle("Doxearch - Document Search Engine")
         self.setGeometry(100, 100, 1000, 700)
@@ -132,6 +170,134 @@ class DoxearchGUI(QMainWindow):
         tabs.addTab(self.create_index_tab(), "Index")
         tabs.addTab(self.create_documents_tab(), "Documents")
         tabs.addTab(self.create_directories_tab(), "Directories")
+        tabs.addTab(self.create_models_tab(), "Models")
+
+    def create_models_tab(self) -> QWidget:
+        """Create the models management tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Info section
+        info_label = QLabel(
+            "Manage spaCy language models used for document processing. "
+            "Models are required for indexing and searching documents."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+
+        # Models directory info
+        models_dir_layout = QHBoxLayout()
+        models_dir_layout.addWidget(QLabel("Models Directory:"))
+        self.models_dir_label = QLabel()
+        self.models_dir_label.setStyleSheet("font-family: monospace;")
+        models_dir_layout.addWidget(self.models_dir_label)
+
+        models_dir_layout.addStretch()
+        layout.addLayout(models_dir_layout)
+
+        # Action buttons layout
+        buttons_layout = QHBoxLayout()
+
+        # Fetch button
+        self.fetch_models_button = QPushButton("Fetch Models")
+        self.fetch_models_button.clicked.connect(self.fetch_models)
+        buttons_layout.addWidget(self.fetch_models_button)
+
+        # Refresh button
+        refresh_button = QPushButton("Refresh")
+        refresh_button.clicked.connect(self.load_models_info)
+        buttons_layout.addWidget(refresh_button)
+
+        buttons_layout.addStretch()
+
+        # Storage info
+        self.storage_label = QLabel("Total storage used: Calculating...")
+        buttons_layout.addWidget(self.storage_label)
+
+        layout.addLayout(buttons_layout)
+
+        # Models table
+        self.models_table = QTableWidget()
+        self.models_table.setColumnCount(6)
+        self.models_table.setHorizontalHeaderLabels(
+            ["Model Name", "Language", "Version", "Size (MB)", "Status", "Description"]
+        )
+        self.models_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.models_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.models_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.models_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.models_table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.models_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.Stretch
+        )
+        self.models_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows
+        )
+        self.models_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.models_table)
+
+        # Action buttons
+        button_layout = QHBoxLayout()
+
+        self.download_model_button = QPushButton("Download Selected")
+        self.download_model_button.clicked.connect(self.download_selected_model)
+        button_layout.addWidget(self.download_model_button)
+
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        # Progress section
+        self.model_progress_label = QLabel()
+        self.model_progress_label.setVisible(False)
+        layout.addWidget(self.model_progress_label)
+
+        self.model_progress_bar = QProgressBar()
+        self.model_progress_bar.setVisible(False)
+        layout.addWidget(self.model_progress_bar)
+
+        # Load models info
+        self.load_models_info()
+
+        return tab
+
+    def fetch_models(self):
+        """Fetch available models from spaCy compatibility.json."""
+        self.fetch_models_button.setEnabled(False)
+        self.fetch_models_button.setText("Fetching...")
+
+        try:
+            # Fetch models
+            self.model_manager.MODEL_URLS = self.model_manager.fetch_available_models()
+
+            # Refresh the table with newly fetched models
+            self.load_models_info()
+
+            models_count = len(self.model_manager.MODEL_URLS)
+            QMessageBox.information(
+                self,
+                "Fetch Complete",
+                f"Successfully fetched {models_count} available models from spaCy.",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Fetch Error",
+                f"Failed to fetch available models:\n{str(e)}",
+            )
+        finally:
+            self.fetch_models_button.setEnabled(True)
+            self.fetch_models_button.setText("Fetch Available Models")
 
     def create_documents_tab(self) -> QWidget:
         """Create the documents tab showing all indexed documents."""
@@ -603,7 +769,17 @@ class DoxearchGUI(QMainWindow):
         model_layout = QHBoxLayout()
         model_layout.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["en_core_web_sm", "lt_core_news_sm"])
+        # Only add available models from ModelManager
+        available_models = [
+            model_info["name"]
+            for model_info in self.model_manager.get_all_models_info()
+            if self.model_manager.is_model_available(model_info["name"])
+        ]
+        if available_models:
+            self.model_combo.addItems(available_models)
+        else:
+            self.model_combo.addItem("No models available")
+            self.model_combo.setEnabled(False)
         model_layout.addWidget(self.model_combo)
         model_layout.addStretch()
         layout.addLayout(model_layout)
@@ -784,17 +960,56 @@ class DoxearchGUI(QMainWindow):
             lemmatization_enabled = active_dir.get("lemmatization_enabled", True)
             stemming_enabled = active_dir.get("stemming_enabled", False)
 
-            index = SQLiteIndex(db_path=db_path)
-            tokenizer = SpacyTokenizer(
-                model=model,
-                use_lemmatization=lemmatization_enabled,
-                use_stemming=stemming_enabled,
-                disable=["parser", "ner"],
-            )
-            self.current_doxearch = Doxearch(folder, index, tokenizer)
+            try:
+                # Check if model is available
+                if not self.model_manager.is_model_available(model):
+                    QMessageBox.warning(
+                        self,
+                        "Model Not Available",
+                        f"The model '{model}' required for the active directory is not available.\n\n"
+                        f"Directory: {directory_path}\n\n"
+                        f"Please download the model from the Models tab or set a different directory as active.",
+                    )
+                    self.active_dir_label.setText(
+                        f"{directory_path} (⚠ Model unavailable)"
+                    )
+                    self.documents_active_dir_label.setText(
+                        f"{directory_path} (⚠ Model unavailable)"
+                    )
+                    self.current_doxearch = None
+                    self.documents_table.setRowCount(0)
+                    self.document_count_label.setText("Total documents: 0")
+                    return
 
-            # Load documents for the active directory
-            self.load_documents()
+                index = SQLiteIndex(db_path=db_path)
+
+                # Get model path from model manager
+                model_path = None
+                if self.model_manager.is_model_in_downloads(model):
+                    model_path = str(self.model_manager.models_dir / model)
+
+                tokenizer = SpacyTokenizer(
+                    model=model,
+                    use_lemmatization=lemmatization_enabled,
+                    use_stemming=stemming_enabled,
+                    disable=["parser", "ner"],
+                    model_path=model_path,
+                )
+                self.current_doxearch = Doxearch(folder, index, tokenizer)
+
+                # Load documents for the active directory
+                self.load_documents()
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error Loading Active Directory",
+                    f"Failed to load active directory:\n{directory_path}\n\nError: {str(e)}",
+                )
+                self.active_dir_label.setText(f"{directory_path} (⚠ Error)")
+                self.documents_active_dir_label.setText(f"{directory_path} (⚠ Error)")
+                self.current_doxearch = None
+                self.documents_table.setRowCount(0)
+                self.document_count_label.setText("Total documents: 0")
         else:
             self.active_dir_label.setText("None")
             self.documents_active_dir_label.setText("None")
@@ -813,7 +1028,6 @@ class DoxearchGUI(QMainWindow):
         if folder:
             self.folder_input.setText(folder)
 
-    
     def start_indexing(self):
         """Start the indexing process."""
         folder_path = self.folder_input.text().strip()
@@ -867,9 +1081,7 @@ class DoxearchGUI(QMainWindow):
                 stemming_enabled=stemming_enabled,
             )
             self.index_status_text.append(f"✓ Registered directory: {folder_str}")
-            self.index_status_text.append(
-                f"  - Model: {model}"
-            )
+            self.index_status_text.append(f"  - Model: {model}")
             self.index_status_text.append(
                 f"  - Lemmatization: {'Enabled' if lemmatization_enabled else 'Disabled'}"
             )
@@ -879,7 +1091,7 @@ class DoxearchGUI(QMainWindow):
         except DirectoryAlreadyIndexedError:
             is_already_indexed = True
             existing_dir_info = self.context_manager.get_directory_info(folder_str)
-            
+
             if force:
                 # Force re-indexing: wipe and rebuild with new settings
                 try:
@@ -909,9 +1121,7 @@ class DoxearchGUI(QMainWindow):
                     self.index_status_text.append(
                         f"✓ Re-registered directory with new settings"
                     )
-                    self.index_status_text.append(
-                        f"  - Model: {model}"
-                    )
+                    self.index_status_text.append(f"  - Model: {model}")
                     self.index_status_text.append(
                         f"  - Lemmatization: {'Enabled' if lemmatization_enabled else 'Disabled'}"
                     )
@@ -943,20 +1153,29 @@ class DoxearchGUI(QMainWindow):
                 self.index_status_text.append(
                     f"💡 Tip: Check 'Force re-indexing' to rebuild with new settings"
                 )
-                
+
                 # Use existing settings for indexing (don't change context record)
-                model = existing_dir_info['tokenizer_model_name']
-                lemmatization_enabled = existing_dir_info.get('lemmatization_enabled', True)
-                stemming_enabled = existing_dir_info.get('stemming_enabled', False)
-                db_path = Path(existing_dir_info['db_path'])
+                model = existing_dir_info["tokenizer_model_name"]
+                lemmatization_enabled = existing_dir_info.get(
+                    "lemmatization_enabled", True
+                )
+                stemming_enabled = existing_dir_info.get("stemming_enabled", False)
+                db_path = Path(existing_dir_info["db_path"])
 
         # Create Doxearch instance
         index = SQLiteIndex(db_path=str(db_path))
+
+        # Get model path from model manager
+        model_path = None
+        if self.model_manager.is_model_in_downloads(model):
+            model_path = str(self.model_manager.models_dir / model)
+
         tokenizer = SpacyTokenizer(
             model=model,
             use_lemmatization=lemmatization_enabled,
             use_stemming=stemming_enabled,
             disable=["parser", "ner"],
+            model_path=model_path,
         )
         doxearch = Doxearch(folder, index, tokenizer)
 
@@ -1176,6 +1395,193 @@ class DoxearchGUI(QMainWindow):
             QMessageBox.warning(
                 self, "Error", f"Failed to open database directory: {str(e)}"
             )
+
+    def load_models_info(self):
+        """Load and display information about available models."""
+        # Update models directory label
+        self.models_dir_label.setText(str(self.model_manager.models_dir))
+
+        # Calculate and display storage usage (only downloaded models)
+        try:
+            total_size = self.model_manager.get_models_directory_size()
+            size_mb = total_size / (1024 * 1024)
+            self.storage_label.setText(f"Downloaded models storage: {size_mb:.2f} MB")
+        except Exception as e:
+            self.storage_label.setText(f"Downloaded models storage: Error - {str(e)}")
+
+        # Get all models info
+        models_info = self.model_manager.get_all_models_info()
+
+        # Disable sorting while populating
+        self.models_table.setSortingEnabled(False)
+
+        # Populate table
+        self.models_table.setRowCount(len(models_info))
+
+        for row, model_info in enumerate(models_info):
+            # Model name
+            name_item = QTableWidgetItem(model_info["name"])
+            self.models_table.setItem(row, 0, name_item)
+
+            # Language
+            lang_item = QTableWidgetItem(model_info["language"])
+            self.models_table.setItem(row, 1, lang_item)
+
+            # Version
+            version_item = QTableWidgetItem(model_info["version"])
+            self.models_table.setItem(row, 2, version_item)
+
+            # Size
+            size_item = QTableWidgetItem(f"{model_info['size_mb']:.1f}")
+            size_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.models_table.setItem(row, 3, size_item)
+
+            # Status with location
+            location = model_info.get("location", "")
+            if location:
+                status = f"✓ Available ({location})"
+                status_item = QTableWidgetItem(status)
+                status_item.setForeground(Qt.GlobalColor.darkGreen)
+            else:
+                status_item = QTableWidgetItem("Not installed")
+            self.models_table.setItem(row, 4, status_item)
+
+            # Description
+            desc_item = QTableWidgetItem(model_info["description"])
+            self.models_table.setItem(row, 5, desc_item)
+
+        # Re-enable sorting after populating
+        self.models_table.setSortingEnabled(True)
+
+    def download_selected_model(self):
+        """Download the selected model."""
+        selected_row = self.models_table.currentRow()
+        if selected_row < 0:
+            QMessageBox.warning(
+                self, "No Selection", "Please select a model to download."
+            )
+            return
+
+        model_name = self.models_table.item(selected_row, 0).text()
+
+        # Check if already in downloads directory
+        if self.model_manager.is_model_in_downloads(model_name):
+            QMessageBox.information(
+                self,
+                "Already Downloaded",
+                f"Model '{model_name}' is already in the downloads directory.",
+            )
+            return
+
+        # Check if available from other sources
+        if self.model_manager.is_model_installed(model_name):
+            model_info = self.model_manager.get_model_info(model_name)
+            location = (
+                model_info.get("location", "unknown") if model_info else "unknown"
+            )
+
+            reply = QMessageBox.question(
+                self,
+                "Model Already Available",
+                f"Model '{model_name}' is already available from: {location}\n\n"
+                f"Do you still want to download it to the downloads directory?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # Get model info for confirmation
+        model_info = self.model_manager.get_model_info(model_name)
+        reply = QMessageBox.question(
+            self,
+            "Confirm Download",
+            f"Download model '{model_name}'?\n\n"
+            f"Language: {model_info['language']}\n"
+            f"Version: {model_info['version']}\n"
+            f"Size: ~{model_info['size_mb']} MB",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.No:
+            return
+
+        # Show progress widgets
+        self.model_progress_label.setVisible(True)
+        self.model_progress_bar.setVisible(True)
+        self.model_progress_bar.setRange(0, 100)
+
+        # Start download in worker thread
+        self.model_download_worker = ModelDownloadWorker(self.model_manager, model_name)
+        self.model_download_worker.progress.connect(self.on_model_download_progress)
+        self.model_download_worker.finished.connect(self.on_model_download_finished)
+        self.model_download_worker.error.connect(self.on_model_download_error)
+        self.model_download_worker.start()
+
+    def on_model_download_progress(self, downloaded: int, total: int, message: str):
+        """Handle model download progress updates."""
+        self.model_progress_label.setText(message)
+
+        if total > 0:
+            progress = int((downloaded / total) * 100)
+            self.model_progress_bar.setValue(progress)
+
+    def on_model_download_finished(self, model_name: str, message: str):
+        """Handle model download completion."""
+        self.download_model_button.setEnabled(True)
+        self.model_progress_label.setVisible(False)
+        self.model_progress_bar.setVisible(False)
+
+        QMessageBox.information(
+            self,
+            "Download Complete",
+            message,
+        )
+
+        # Refresh models table
+        self.load_models_info()
+
+        # Refresh model combo box in index tab
+        self.refresh_model_combo()
+
+    def refresh_model_combo(self):
+        """Refresh the model combo box with currently available models."""
+        current_selection = self.model_combo.currentText()
+
+        self.model_combo.clear()
+
+        # Get available models from ModelManager
+        available_models = [
+            model_info["name"]
+            for model_info in self.model_manager.get_all_models_info()
+            if self.model_manager.is_model_available(model_info["name"])
+        ]
+
+        if available_models:
+            self.model_combo.addItems(available_models)
+            self.model_combo.setEnabled(True)
+
+            # Try to restore previous selection if it's still available
+            if current_selection in available_models:
+                self.model_combo.setCurrentText(current_selection)
+        else:
+            self.model_combo.addItem("No models available")
+            self.model_combo.setEnabled(False)
+
+    def on_model_download_error(self, error_message: str):
+        """Handle model download errors."""
+        self.download_model_button.setEnabled(True)
+        self.model_progress_label.setVisible(False)
+        self.model_progress_bar.setVisible(False)
+
+        QMessageBox.critical(
+            self,
+            "Download Error",
+            f"An error occurred while downloading the model:\n{error_message}",
+        )
 
 
 def main():
