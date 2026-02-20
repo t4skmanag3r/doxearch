@@ -17,7 +17,13 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.0.2", "pytest-cov>=7.0.0"]
+dev = [
+    "nuitka>=4.0.1",
+    "ordered-set>=4.1.0",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "zstandard>=0.25.0",
+]
 
 [project.scripts]
 # CLI entry point
