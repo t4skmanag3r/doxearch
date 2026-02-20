@@ -1,0 +1,77 @@
+
+name: Build Executables
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            executable_name: doxearch-gui
+            artifact_name: doxearch-gui-linux
+          - os: windows-latest
+            executable_name: doxearch-gui.exe
+            artifact_name: doxearch-gui-windows
+          - os: macos-latest
+            executable_name: doxearch-gui
+            artifact_name: doxearch-gui-macos
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Install uv (Unix)
+      if: runner.os != 'Windows'
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Install uv (Windows)
+      if: runner.os == 'Windows'
+      run: irm https://astral.sh/uv/install.ps1 | iex
+      shell: powershell
+    
+    - name: Install dependencies
+      run: |
+        uv sync --all-extras
+    
+    - name: Install ccache (Ubuntu)
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y ccache
+    
+    - name: Install ccache (macOS)
+      if: runner.os == 'macOS'
+      run: brew install ccache
+    
+    - name: Build executable
+      run: |
+        uv run python build_nuitka.py
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: ${{ matrix.executable_name }}
+        retention-days: 30
+    
+    - name: Create Release (on tag)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ matrix.executable_name }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

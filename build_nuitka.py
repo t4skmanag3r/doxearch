@@ -2,6 +2,7 @@
 Optimized build script for packaging Doxearch GUI with Nuitka.
 """
 
+import os
 import platform
 import shutil
 import subprocess
@@ -50,6 +51,37 @@ def check_dependencies():
         print("  macOS: brew install ccache")
 
 
+def get_platform_flags(system: str) -> list[str]:
+    """Get platform-specific Nuitka flags."""
+    flags = []
+
+    if system == "Windows":
+        flags.extend(
+            [
+                "--windows-disable-console",
+                "--windows-icon-from-ico=assets/icon.ico",  # Optional: add icon
+                "--windows-company-name=Doxearch",
+                "--windows-product-name=Doxearch",
+                "--windows-file-version=0.1.0",
+                "--windows-product-version=0.1.0",
+                "--windows-file-description=Document Search Engine",
+            ]
+        )
+    elif system == "Darwin":  # macOS
+        flags.extend(
+            [
+                "--macos-disable-console",
+                "--macos-create-app-bundle",
+                "--macos-app-name=Doxearch",
+                "--macos-app-version=0.1.0",
+            ]
+        )
+    else:  # Linux
+        flags.append("--disable-console")
+
+    return flags
+
+
 def build_executable():
     """Build the executable using Nuitka."""
 
@@ -66,6 +98,7 @@ def build_executable():
     print()
 
     system = platform.system()
+    is_ci = "CI" in os.environ or "GITHUB_ACTIONS" in os.environ
 
     # Base Nuitka command
     nuitka_cmd = [
@@ -75,16 +108,6 @@ def build_executable():
         # Output settings
         "--standalone",
         "--onefile",
-        # GUI settings
-        (
-            "--disable-console"
-            if system == "Linux"
-            else (
-                "--windows-disable-console"
-                if system == "Windows"
-                else "--macos-disable-console"
-            )
-        ),
         # Application settings
         "--enable-plugin=pyqt6",
         # spaCy language models (include all installed)
@@ -102,12 +125,17 @@ def build_executable():
         "--remove-output",
         # Assume yes for downloads
         "--assume-yes-for-downloads",
-        # Entry point
-        "doxearch_gui/main.py",
     ]
+
+    # Add platform-specific flags
+    nuitka_cmd.extend(get_platform_flags(system))
+
+    # Add entry point
+    nuitka_cmd.append("doxearch_gui/main.py")
 
     print("Building executable with Nuitka...")
     print(f"Platform: {system}")
+    print(f"CI Environment: {is_ci}")
     print(f"Command: {' '.join(nuitka_cmd)}")
     print()
 
