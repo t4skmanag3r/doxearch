@@ -56,7 +56,7 @@ def get_platform_flags(system: str) -> list[str]:
     if system == "Windows":
         flags.extend(
             [
-                "--windows-disable-console",
+                "--windows-console-mode=disable",
                 "--windows-company-name=Doxearch",
                 "--windows-product-name=Doxearch",
                 "--windows-file-version=0.1.0",
@@ -67,14 +67,14 @@ def get_platform_flags(system: str) -> list[str]:
     elif system == "Darwin":  # macOS
         flags.extend(
             [
-                "--macos-disable-console",
+                "--macos-console-mode=disable",
                 "--macos-create-app-bundle",
                 "--macos-app-name=Doxearch",
                 "--macos-app-version=0.1.0",
             ]
         )
     else:  # Linux
-        flags.append("--disable-console")
+        flags.append("--linux-console-mode=disable")
 
     return flags
 
@@ -97,6 +97,9 @@ def build_executable():
     system = platform.system()
     is_ci = "CI" in os.environ or "GITHUB_ACTIONS" in os.environ
 
+    # Determine number of jobs (use more in CI, but not too many to avoid memory issues)
+    jobs = 6 if is_ci else 4
+
     # Base Nuitka command
     nuitka_cmd = [
         sys.executable,
@@ -116,12 +119,16 @@ def build_executable():
         "--include-package=doxearch_gui",
         "--include-package=doxearch_cli",
         # Performance optimizations
-        "--lto=yes",
-        "--jobs=4",  # Use 4 parallel jobs
+        "--lto=no",  # Disable LTO to reduce memory usage and compilation time
+        f"--jobs={jobs}",
         # Clean build directories after successful build
         "--remove-output",
         # Assume yes for downloads
         "--assume-yes-for-downloads",
+        # Show progress
+        "--show-progress",
+        # Reduce memory usage
+        "--low-memory",
     ]
 
     # Add platform-specific flags
@@ -133,6 +140,7 @@ def build_executable():
     print("Building executable with Nuitka...")
     print(f"Platform: {system}")
     print(f"CI Environment: {is_ci}")
+    print(f"Jobs: {jobs}")
     print(f"Command: {' '.join(nuitka_cmd)}")
     print()
 

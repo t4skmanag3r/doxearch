@@ -1,4 +1,3 @@
-
 name: Build Executables
 
 on:
@@ -12,6 +11,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false  # Continue other builds if one fails
       matrix:
         os: [ubuntu-latest, windows-latest]
         include:
@@ -23,6 +23,7 @@ jobs:
             artifact_name: doxearch-gui-windows
     
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90  # Increase timeout
     
     steps:
     - name: Checkout code
@@ -42,6 +43,19 @@ jobs:
       run: irm https://astral.sh/uv/install.ps1 | iex
       shell: powershell
     
+    # Cache Nuitka build artifacts
+    - name: Cache Nuitka
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/Nuitka
+          ~/AppData/Local/Nuitka
+          ~/.ccache
+          ~/AppData/Local/ccache
+        key: ${{ runner.os }}-nuitka-${{ hashFiles('**/pyproject.toml', '**/uv.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-nuitka-
+    
     - name: Install dependencies
       run: |
         uv sync --all-extras
@@ -50,9 +64,19 @@ jobs:
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y ccache
     
+    # Set up ccache for Windows
+    - name: Set up ccache (Windows)
+      if: runner.os == 'Windows'
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ${{ runner.os }}-ccache
+        max-size: 2G
+    
     - name: Build executable
       run: |
         uv run python build_nuitka.py
+      env:
+        CCACHE_DIR: ${{ runner.os == 'Windows' && 'C:\ccache' || '~/.ccache' }}
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
