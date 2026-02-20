@@ -13,7 +13,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         include:
           - os: ubuntu-latest
             executable_name: doxearch-gui
@@ -21,9 +21,6 @@ jobs:
           - os: windows-latest
             executable_name: doxearch-gui.exe
             artifact_name: doxearch-gui-windows
-          - os: macos-latest
-            executable_name: doxearch-gui
-            artifact_name: doxearch-gui-macos
     
     runs-on: ${{ matrix.os }}
     
@@ -52,10 +49,6 @@ jobs:
     - name: Install ccache (Ubuntu)
       if: runner.os == 'Linux'
       run: sudo apt-get update && sudo apt-get install -y ccache
-    
-    - name: Install ccache (macOS)
-      if: runner.os == 'macOS'
-      run: brew install ccache
     
     - name: Build executable
       run: |
