@@ -73,8 +73,6 @@ def get_platform_flags(system: str) -> list[str]:
                 "--macos-app-version=0.1.0",
             ]
         )
-    else:  # Linux
-        flags.append("--linux-console-mode=disable")
 
     return flags
 
@@ -97,9 +95,6 @@ def build_executable():
     system = platform.system()
     is_ci = "CI" in os.environ or "GITHUB_ACTIONS" in os.environ
 
-    # Determine number of jobs (use more in CI, but not too many to avoid memory issues)
-    jobs = 6 if is_ci else 4
-
     # Base Nuitka command
     nuitka_cmd = [
         sys.executable,
@@ -119,16 +114,13 @@ def build_executable():
         "--include-package=doxearch_gui",
         "--include-package=doxearch_cli",
         # Performance optimizations
-        "--lto=no",  # Disable LTO to reduce memory usage and compilation time
-        f"--jobs={jobs}",
+        # "--lto=no",  # Disable LTO to reduce memory usage and compilation time
         # Clean build directories after successful build
         "--remove-output",
         # Assume yes for downloads
         "--assume-yes-for-downloads",
         # Show progress
         "--show-progress",
-        # Reduce memory usage
-        "--low-memory",
     ]
 
     # Add platform-specific flags
@@ -140,7 +132,6 @@ def build_executable():
     print("Building executable with Nuitka...")
     print(f"Platform: {system}")
     print(f"CI Environment: {is_ci}")
-    print(f"Jobs: {jobs}")
     print(f"Command: {' '.join(nuitka_cmd)}")
     print()
 
