@@ -137,10 +137,10 @@ The project uses:
 - automated checks using pytest
 
 ## License
-[Add license information here]
+This project is licensed under the MIT License - see [LICENSE](./LICENSE) for details
 
 ## Contributing
-[Add contribution guidelines here]
+Contributions are welcome, just submit a pull request, thank you!
 
 ## Support
 For issues, questions, or contributions, please open an issue on GitHub.
