@@ -1,4 +1,3 @@
-
 import os
 import platform
 import subprocess
@@ -9,7 +8,7 @@ from PyQt6.QtWidgets import QMessageBox
 
 def open_file(filepath: str, parent_widget=None):
     """Open a file with the system's default application.
-    
+
     Args:
         filepath: Path to the file to open
         parent_widget: Parent widget for error dialogs
@@ -42,7 +41,7 @@ def open_file(filepath: str, parent_widget=None):
 
 def open_folder(filepath: str, parent_widget=None):
     """Open the folder containing the specified file.
-    
+
     Args:
         filepath: Path to the file whose folder should be opened
         parent_widget: Parent widget for error dialogs
@@ -62,7 +61,7 @@ def open_folder(filepath: str, parent_widget=None):
         system = platform.system()
         if system == "Windows":
             # Use explorer with /select to highlight the file
-            subprocess.run(["explorer", "/select,", filepath], check=True)
+            subprocess.run(["explorer", "/select,", filepath], check=False)
         elif system == "Darwin":  # macOS
             # Use open -R to reveal the file in Finder
             subprocess.run(["open", "-R", filepath], check=True)
