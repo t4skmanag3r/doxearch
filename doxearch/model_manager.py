@@ -366,6 +366,14 @@ class ModelManager:
         info["location"] = location
         info["installed"] = location is not None
 
+        # Add status field for GUI
+        if location in ("bundled", "downloaded", "system"):
+            info["status"] = "Installed"
+        elif model_name in self.MODEL_URLS:
+            info["status"] = "Available"
+        else:
+            info["status"] = "Not Available"
+
         return info
 
     def get_all_models_info(self) -> list[dict]:
