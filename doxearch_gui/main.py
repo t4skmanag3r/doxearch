@@ -21,8 +21,17 @@ class DoxearchGUI(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Initialize context manager
+        # Initialize application data directory
         self.app_data_dir = get_app_data_dir()
+
+        # Ensure required subdirectories exist
+        self.indexes_dir = self.app_data_dir / "indexes"
+        self.indexes_dir.mkdir(parents=True, exist_ok=True)
+
+        self.models_dir = self.app_data_dir / "models"
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize context manager
         self.context_db_path = self.app_data_dir / "context_manager.db"
         self.context_manager = DirectoryContextManager(
             db_path=str(self.context_db_path)
@@ -31,7 +40,6 @@ class DoxearchGUI(QMainWindow):
         self.current_doxearch: Optional[Doxearch] = None
 
         # Initialize model manager
-        self.models_dir = self.app_data_dir / "models"
         self.model_manager = ModelManager(models_dir=self.models_dir)
 
         self.setWindowTitle("Doxearch - Document Search Engine")
