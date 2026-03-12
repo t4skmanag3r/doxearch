@@ -48,10 +48,19 @@ def check_dependencies():
         print("  Ubuntu/Debian: sudo apt-get install ccache")
         print("  macOS: brew install ccache")
 
+    # Check for logo files
+    logo_ico = Path("doxearch-logo.ico")
+
+    if logo_ico.exists():
+        print(f"[OK] Logo ICO file found: {logo_ico}")
+    else:
+        print(f"[WARNING] Logo ICO file not found: {logo_ico}")
+
 
 def get_platform_flags(system: str) -> list[str]:
     """Get platform-specific Nuitka flags."""
     flags = []
+    logo_ico = Path("doxearch-logo.ico")
 
     if system == "Windows":
         flags.extend(
@@ -64,6 +73,9 @@ def get_platform_flags(system: str) -> list[str]:
                 "--windows-file-description=Document Search Engine",
             ]
         )
+        # Add icon for Windows - prefer .ico file
+        if logo_ico.exists():
+            flags.append(f"--windows-icon-from-ico={logo_ico}")
     elif system == "Darwin":  # macOS
         flags.extend(
             [
@@ -95,6 +107,11 @@ def build_executable():
     system = platform.system()
     is_ci = "CI" in os.environ or "GITHUB_ACTIONS" in os.environ
 
+    # Determine which logo files to include
+    data_files = []
+    if Path("doxearch-logo.ico").exists():
+        data_files.append("--include-data-files=doxearch-logo.ico=doxearch-logo.ico")
+
     # Base Nuitka command
     nuitka_cmd = [
         sys.executable,
@@ -122,6 +139,9 @@ def build_executable():
         # Show progress
         "--show-progress",
     ]
+
+    # Add logo data files if they exist
+    nuitka_cmd.extend(data_files)
 
     # Add platform-specific flags
     nuitka_cmd.extend(get_platform_flags(system))
