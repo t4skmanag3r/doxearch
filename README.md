@@ -17,13 +17,15 @@ Doxearch is a powerful **local document search engine** that uses **TF-IDF** (Te
 
 ## Requirements
 
+ **None if using standalone binary executable**
+
 - Python 3.12 or higher
 - [uv](https://github.com/astral-sh/uv) environment manager
 - spaCy with language models (en_core_web_sm and others)
 
 ## Installation
 
-### Binary
+### Binary Executable
 
 Download the latest pre-built executable from the [Releases](https://github.com/t4skmanag3r/doxearch/releases) page:
 
@@ -40,7 +42,7 @@ No installation required - just download and run!
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/doxearch.git
+git clone https://github.com/t4skmanag3r/doxearch.git
 cd doxearch
 ```
 
@@ -58,8 +60,9 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 uv sync --all-extras
 ```
 
-
 ### Command-Line Interface (CLI)
+
+[WiP]
 
 ### Graphical User Interface (GUI)
 
