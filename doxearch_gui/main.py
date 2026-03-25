@@ -1102,12 +1102,11 @@ class DoxearchGUI(QMainWindow):
                     # Remove the directory from context manager
                     self.context_manager.remove_indexed_directory(folder_str)
 
-                    # Delete the database file if it exists
+                    # Clear the data if the database exists
                     if db_path.exists():
-                        db_path.unlink()
-                        self.index_status_text.append(
-                            f"✓ Deleted existing database: {db_path.name}"
-                        )
+                        temp_index = SQLiteIndex(str(db_path))
+                        temp_index.clear_all_data()
+                        temp_index.close()
 
                     # Re-register the directory with new settings
                     self.context_manager.add_indexed_directory(

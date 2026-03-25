@@ -11,6 +11,14 @@ from doxearch.doc_index.types import (
 
 class DocIndex(ABC):
     @abstractmethod
+    def close(self) -> None:
+        """Cleanly close the index connection"""
+
+    @abstractmethod
+    def clear_all_data(self) -> None:
+        """Clear all data from the index."""
+
+    @abstractmethod
     def add_document(
         self,
         document_id: str,

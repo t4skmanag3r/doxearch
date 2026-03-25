@@ -118,11 +118,12 @@ class CorpusStats(Base):
 
 
 class SQLiteIndex(DocIndex):
-    def __init__(self, db_path: str = "doxearch.db"):
+    def __init__(self, db_path: str):
         """Initialize SQLite index with the given database path."""
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        self.db_path = db_path
 
     @contextmanager
     def get_session(self) -> Generator[Session, None, None]:
@@ -145,6 +146,21 @@ class SQLiteIndex(DocIndex):
             raise e
         finally:
             session.close()
+
+    def close(self) -> None:
+        """Close the database connection and dispose of the engine."""
+        if hasattr(self, "engine"):
+            self.engine.dispose()
+
+    def clear_all_data(self) -> None:
+        """Clear all data from the database"""
+        with self.get_session() as session:
+            # Delete in correct order due to foreign key constraints
+            session.query(InvertedIndex).delete()
+            session.query(DocumentFrequency).delete()
+            session.query(Document).delete()
+            session.query(CorpusStats).delete()
+            session.commit()
 
     def add_document(
         self,
