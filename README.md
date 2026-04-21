@@ -6,6 +6,8 @@ Local search engine for indexing documents (PDFs, docxs, etc.) using TF-IDF.
 
 Doxearch is a powerful **local document search engine** that uses **TF-IDF** (Term Frequency-Inverse Document Frequency) algorithm to index and search through your documents. It supports multiple document formats and provides both command-line and graphical user interfaces.
 
+![Doxearch GUI Screenshot](./public/showcase.png)
+
 ## Features
 
 - **Multiple Document Formats**: Support for PDF and DOCX files
