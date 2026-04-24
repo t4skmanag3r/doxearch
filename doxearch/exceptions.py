@@ -32,3 +32,19 @@ class DirectoryDoesntExistError(ContextManagerError):
     def __init__(self, directory_path):
         self.directory_path = directory_path
         super().__init__(f"Directory does not exist: {directory_path}")
+
+
+class EmptyDirectoryError(ContextManagerError):
+    """Raised when an empty directory is provided"""
+
+    def __init__(self, directory_path):
+        self.directory_path = directory_path
+        super().__init__(f"Directory is empty: {directory_path}")
+
+
+class NoSupportedFilesFoundError(ContextManagerError):
+    """Raised when no supported files are found in a directory"""
+
+    def __init__(self, directory_path):
+        self.directory_path = directory_path
+        super().__init__(f"No supported files found in directory: {directory_path}")

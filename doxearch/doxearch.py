@@ -8,7 +8,11 @@ from typing import Optional
 from doxearch.doc_index.doc_index import DocIndex
 from doxearch.doc_parser.parsers.docx_parser import DocxParser
 from doxearch.doc_parser.parsers.pdf_parser import PDFParser
-from doxearch.exceptions import DirectoryDoesntExistError
+from doxearch.exceptions import (
+    DirectoryDoesntExistError,
+    EmptyDirectoryError,
+    NoSupportedFilesFoundError,
+)
 from doxearch.tf_idf.tf_idf import compute_idf, compute_tf_idf
 from doxearch.tokenizer.tokenizer import Tokenizer
 from doxearch.utils.file_hash import compute_file_hash
@@ -50,10 +54,16 @@ class Doxearch:
         if not self.folder_path.exists():
             raise DirectoryDoesntExistError(str(self.folder_path))
 
+        if not any(self.folder_path.iterdir()):
+            raise EmptyDirectoryError(str(self.folder_path))
+
         start_time = time.time()
         pdf_files = list(self.folder_path.rglob("*.pdf"))
         docx_files = list(self.folder_path.rglob("*.docx"))
         files = pdf_files + docx_files
+
+        if len(files) == 0:
+            raise NoSupportedFilesFoundError(str(self.folder_path))
 
         print(
             f"Found {len(pdf_files)} PDF files and {len(docx_files)} DOCX files to process\n"
