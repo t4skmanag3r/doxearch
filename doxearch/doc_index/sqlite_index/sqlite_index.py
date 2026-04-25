@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 from doxearch.doc_index.doc_index import DocIndex
 from doxearch.doc_index.sqlite_index.exceptions import (
+    DatabaseOperationError,
     DocumentExistsError,
     DocumentNotFoundError,
     InvalidDocumentIdError,
@@ -654,6 +655,9 @@ class SQLiteIndex(DocIndex):
         if not documents:
             return
 
+        # SQLite has a limit of 999 variables per query
+        SQLITE_MAX_VARIABLES = 999
+
         with self.get_session() as session:
             try:
                 # Validate all documents first (fail fast)
@@ -694,14 +698,21 @@ class SQLiteIndex(DocIndex):
                 session.bulk_save_objects(doc_records)
                 session.flush()
 
-                # Update document frequencies in bulk
-                existing_terms = (
-                    session.query(DocumentFrequency)
-                    .filter(DocumentFrequency.term.in_(global_term_frequencies.keys()))
-                    .all()
-                )
+                # Update document frequencies in bulk, handling SQLite variable limit
+                all_terms = list(global_term_frequencies.keys())
+                existing_term_map: dict[str, DocumentFrequency] = {}
 
-                existing_term_map = {df.term: df for df in existing_terms}
+                # Process terms in chunks to avoid exceeding SQLite's variable limit
+                for i in range(0, len(all_terms), SQLITE_MAX_VARIABLES):
+                    term_chunk = all_terms[i : i + SQLITE_MAX_VARIABLES]
+                    existing_terms = (
+                        session.query(DocumentFrequency)
+                        .filter(DocumentFrequency.term.in_(term_chunk))
+                        .all()
+                    )
+                    for df in existing_terms:
+                        existing_term_map[df.term] = df
+
                 new_df_records = []
 
                 for term, total_freq in global_term_frequencies.items():
@@ -768,10 +779,6 @@ class SQLiteIndex(DocIndex):
 
             except Exception as e:
                 session.rollback()
-                from doxearch.doc_index.sqlite_index.exceptions import (
-                    DatabaseOperationError,
-                )
-
                 raise DatabaseOperationError("add_documents_batch", e) from e
 
     def get_all_documents(self) -> list[Document]:

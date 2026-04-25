@@ -59,8 +59,8 @@ def get_platform_flags(system: str) -> list[str]:
                 "--windows-console-mode=disable",
                 "--windows-company-name=Doxearch",
                 "--windows-product-name=Doxearch",
-                "--windows-file-version=0.1.0",
-                "--windows-product-version=0.1.0",
+                "--windows-file-version=0.1.2",
+                "--windows-product-version=0.1.2",
                 "--windows-file-description=Document Search Engine",
             ]
         )
@@ -70,7 +70,7 @@ def get_platform_flags(system: str) -> list[str]:
                 "--macos-console-mode=disable",
                 "--macos-create-app-bundle",
                 "--macos-app-name=Doxearch",
-                "--macos-app-version=0.1.0",
+                "--macos-app-version=0.1.2",
             ]
         )
 
